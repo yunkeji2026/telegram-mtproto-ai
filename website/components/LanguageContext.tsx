@@ -22,7 +22,7 @@ function routeLangOf(pathname: string | null): Lang | null {
 
 /** 拥有 zh/en 双路由的营销页根路径（"" = 首页）。落地页/条款页切语言时走 URL 前缀互换，
  *  保证分享链接与 SEO 语言一致；其余路由（/admin /app 等）仅切换字典。 */
-const DUAL_LOCALE_BASES = new Set(["", "/voice", "/face", "/interpreting", "/privacy", "/terms"]);
+const DUAL_LOCALE_BASES = new Set(["", "/voice", "/face", "/interpreting", "/asset-safe", "/nurture", "/download", "/privacy", "/terms"]);
 
 function dualLocaleBase(pathname: string | null): string | null {
   if (!pathname) return null;

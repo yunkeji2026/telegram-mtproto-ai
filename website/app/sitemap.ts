@@ -7,6 +7,10 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${SITE_URL}${slug}`, lastModified: now, changeFrequency: "weekly" as const, priority: 0.8 },
     { url: `${SITE_URL}/en${slug}`, lastModified: now, changeFrequency: "weekly" as const, priority: 0.7 },
   ]);
+  const download = [
+    { url: `${SITE_URL}/download`, lastModified: now, changeFrequency: "weekly" as const, priority: 0.9 },
+    { url: `${SITE_URL}/en/download`, lastModified: now, changeFrequency: "weekly" as const, priority: 0.8 },
+  ];
   return [
     {
       url: SITE_URL,
@@ -20,6 +24,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "weekly",
       priority: 0.9,
     },
+    ...download,
     ...landing,
     {
       url: `${SITE_URL}/privacy`,
