@@ -124,3 +124,60 @@ def setup_contacts_subsystem(assistant):
                         "(contacts.rpa_hooks.whatsapp=false)")
     except Exception as ex:
         assistant.logger.warning("Contacts 子系统启动跳过: %s", ex)
+
+
+def setup_device_management(assistant):
+    """装配设备管理三件套(Stage3,从 initialize() 原样迁出):多平台设备协调器、
+    设备注册表 DB、ADB 热插拔 Watcher。均 try/except 兜底,失败不挡启动。"""
+    # 多平台设备协调器（Device Coordinator）
+    try:
+        _dc_cfg = (assistant.config.config or {}).get("device_coordinator") or {}
+        if isinstance(_dc_cfg, dict) and _dc_cfg.get("enabled"):
+            from src.integrations.shared.device_service import DeviceCoordinatorService
+            assistant.device_coordinator_service = DeviceCoordinatorService(
+                config_manager=assistant.config,
+                skill_manager=assistant.skill_manager,
+                dc_cfg=_dc_cfg,
+            )
+            assistant.logger.info("DeviceCoordinatorService 已构建")
+    except Exception as ex:
+        assistant.logger.warning("DeviceCoordinatorService 构建跳过: %s", ex)
+
+    # 初始化设备注册表 DB（可配置路径，支持远程主机不同路径）
+    try:
+        _reg_cfg = (assistant.config.config or {}).get("device_registry") or {}
+        _reg_db_path = _reg_cfg.get("db_path", "")
+        if _reg_db_path:
+            from src.shared.device_registry import get_device_registry
+            get_device_registry(_reg_db_path)
+            assistant.logger.info("DeviceRegistry 初始化（db=%s）", _reg_db_path)
+    except Exception as ex:
+        assistant.logger.warning("DeviceRegistry 初始化跳过: %s", ex)
+
+    # ADB 热插拔自动纳管（HotPlug Watcher）
+    try:
+        _hp_cfg = (assistant.config.config or {}).get("hotplug_watcher") or {}
+        # 默认启用（只要 device_coordinator 启用）
+        _hp_enabled = _hp_cfg.get("enabled", bool(assistant.device_coordinator_service))
+        if _hp_enabled:
+            from src.integrations.shared.hotplug_watcher import HotPlugWatcher
+            # 收集静态配置中已管理的 serial，防止重复纳管
+            _static_serials = set()
+            if assistant.device_coordinator_service:
+                for c in assistant.device_coordinator_service.coordinators:
+                    _static_serials.add(c._serial)
+            _host_name = str(_hp_cfg.get("host_name", "")).strip()
+            assistant.hotplug_watcher = HotPlugWatcher(
+                config_manager=assistant.config,
+                skill_manager=assistant.skill_manager,
+                scan_interval_sec=float(_hp_cfg.get("scan_interval_sec", 15)),
+                static_serials=_static_serials,
+                host_name=_host_name,
+                offline_timeout_sec=float(_hp_cfg.get("offline_timeout_sec", 30)),
+            )
+            assistant.logger.info(
+                "HotPlugWatcher 已构建（host=%s, 静态设备: %d 台）",
+                _host_name or "(all)", len(_static_serials),
+            )
+    except Exception as ex:
+        assistant.logger.warning("HotPlugWatcher 构建跳过: %s", ex)

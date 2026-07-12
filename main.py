@@ -433,58 +433,9 @@ class AIChatAssistant:
             except Exception as ex:
                 self.logger.warning("WhatsApp RPA 服务构建跳过: %s", ex)
 
-            # 多平台设备协调器（Device Coordinator）
-            try:
-                _dc_cfg = (self.config.config or {}).get("device_coordinator") or {}
-                if isinstance(_dc_cfg, dict) and _dc_cfg.get("enabled"):
-                    from src.integrations.shared.device_service import DeviceCoordinatorService
-                    self.device_coordinator_service = DeviceCoordinatorService(
-                        config_manager=self.config,
-                        skill_manager=self.skill_manager,
-                        dc_cfg=_dc_cfg,
-                    )
-                    self.logger.info("DeviceCoordinatorService 已构建")
-            except Exception as ex:
-                self.logger.warning("DeviceCoordinatorService 构建跳过: %s", ex)
-
-            # 初始化设备注册表 DB（可配置路径，支持远程主机不同路径）
-            try:
-                _reg_cfg = (self.config.config or {}).get("device_registry") or {}
-                _reg_db_path = _reg_cfg.get("db_path", "")
-                if _reg_db_path:
-                    from src.shared.device_registry import get_device_registry
-                    get_device_registry(_reg_db_path)
-                    self.logger.info("DeviceRegistry 初始化（db=%s）", _reg_db_path)
-            except Exception as ex:
-                self.logger.warning("DeviceRegistry 初始化跳过: %s", ex)
-
-            # ADB 热插拔自动纳管（HotPlug Watcher）
-            try:
-                _hp_cfg = (self.config.config or {}).get("hotplug_watcher") or {}
-                # 默认启用（只要 device_coordinator 启用）
-                _hp_enabled = _hp_cfg.get("enabled", bool(self.device_coordinator_service))
-                if _hp_enabled:
-                    from src.integrations.shared.hotplug_watcher import HotPlugWatcher
-                    # 收集静态配置中已管理的 serial，防止重复纳管
-                    _static_serials = set()
-                    if self.device_coordinator_service:
-                        for c in self.device_coordinator_service.coordinators:
-                            _static_serials.add(c._serial)
-                    _host_name = str(_hp_cfg.get("host_name", "")).strip()
-                    self.hotplug_watcher = HotPlugWatcher(
-                        config_manager=self.config,
-                        skill_manager=self.skill_manager,
-                        scan_interval_sec=float(_hp_cfg.get("scan_interval_sec", 15)),
-                        static_serials=_static_serials,
-                        host_name=_host_name,
-                        offline_timeout_sec=float(_hp_cfg.get("offline_timeout_sec", 30)),
-                    )
-                    self.logger.info(
-                        "HotPlugWatcher 已构建（host=%s, 静态设备: %d 台）",
-                        _host_name or "(all)", len(_static_serials),
-                    )
-            except Exception as ex:
-                self.logger.warning("HotPlugWatcher 构建跳过: %s", ex)
+            # 设备管理: 协调器 / 注册表 / 热插拔(HotPlug)
+            from src.bootstrap.services import setup_device_management
+            setup_device_management(self)
 
             # ── Contacts 跨平台子系统（feature flag 控制）──
             from src.bootstrap.services import setup_contacts_subsystem
