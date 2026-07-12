@@ -359,6 +359,25 @@ python -m pytest tests/test_faq_resolution_gate.py tests/test_translation_qualit
 - 新子系统默认 `enabled: false`（见 `config/config.yaml::contacts.enabled`）
 - ALTER TABLE 集中到 `src/**/database.py` 的 migration 列表，不散落
 
+### 生产服务重启纪律（本机 main.py 常驻，重启窗口 ~15-30s 全站不可用）
+
+**能不重启就不重启**：
+- 纯模板改动（`src/web/templates/**.html` 的 HTML/JS）**免重启**——Jinja2 `auto_reload`
+  已开（`src/web/admin.py`），刷新浏览器即生效；
+- `web_i18n.py` 键改动**免重启**——mtime 热加载（2s 节流，坏保存态保留旧字典）；
+- `config.yaml` / `config.local.yaml` 改动**免重启**——`check_and_hot_reload` 双文件监视
+  （30s 节流；重载走 load() 同路径保 overlay 不丢；telegram 凭证键受保护不热改），
+  触发点＝Telegram 消息循环 + **web 请求检查点**（静默期靠任意页面/接口访问触发）；
+  brand 白标段随 on_reload 联动刷进模板 globals；
+- 验证类改动先跑 pytest（测试自建 app/store，不依赖常驻服务），别用「重启生产看效果」当测试。
+
+**必须重启时**（业务 .py 改动）：
+- 用 `scripts\restart_main.ps1`（停旧→起新→**轮询 /login 到 200**→报告窗口耗时；
+  起失败会大声报错而非静默死机）；
+- **攒批重启**：多项改动合一次重启，别每改一行重启一次（2026-07-12 曾一天重启 13 次，
+  坐席端反复撞「加载超时」红屏——前端虽已有自动退避重连自愈，但窗口本身应尽量少出现）；
+- 多 agent 并发**必须 worktree 隔离**（见 Git workflow），只有负责生产机的那条线才碰常驻服务。
+
 ### Git workflow
 
 本 repo **2026-04-24 首次进 git**。现阶段：
