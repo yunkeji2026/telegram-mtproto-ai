@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Menu, X, Languages } from "lucide-react";
+import { Menu, X, Languages, Download } from "lucide-react";
 import { useLang } from "./LanguageContext";
 import { useTelegram } from "./TelegramProvider";
 import { CONTACT_URL } from "@/lib/site";
@@ -49,6 +49,10 @@ export default function Navbar() {
     { href: "#contact", label: t.nav.contact },
   ];
 
+  // 下载页是独立路由（非首页锚点），按当前语言走 zh/en 前缀。
+  const downloadHref = lang === "zh" ? "/download" : "/en/download";
+  const downloadLabel = lang === "zh" ? "下载" : "Download";
+
   return (
     <header
       className={`fixed inset-x-0 top-0 z-50 transition-all ${
@@ -84,6 +88,14 @@ export default function Navbar() {
         </div>
 
         <div className="flex items-center gap-3">
+          <a
+            href={downloadHref}
+            onClick={() => track("cta_click", { where: "nav_download" })}
+            className="hidden items-center gap-1.5 rounded-full border border-neon-cyan/40 px-3.5 py-1.5 text-xs font-medium text-neon-cyan transition hover:bg-neon-cyan/10 sm:inline-flex"
+          >
+            <Download className="h-4 w-4" />
+            {downloadLabel}
+          </a>
           <button
             onClick={toggle}
             className="flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1.5 text-xs text-slate-300 transition hover:border-neon-cyan/50 hover:text-white"
@@ -140,6 +152,14 @@ export default function Navbar() {
               className="rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/5 hover:text-white"
             >
               {lang === "zh" ? "品牌" : "Brand"}
+            </a>
+            <a
+              href={downloadHref}
+              onClick={() => { setOpen(false); track("cta_click", { where: "nav_download_mobile" }); }}
+              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-neon-cyan hover:bg-neon-cyan/10"
+            >
+              <Download className="h-4 w-4" />
+              {downloadLabel}
             </a>
             <a
               href={isMiniApp ? "#contact" : CONTACT_URL}
