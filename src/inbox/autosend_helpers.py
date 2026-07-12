@@ -318,3 +318,159 @@ def _is_desktop_account(platform, account_id) -> bool:
         return str(_row.get("mode") or "") == "desktop"
     except Exception:
         return False
+
+
+def build_autosend_translate_cb(assistant, web_app):
+    """构造 AutosendWorker 出站自动翻译回调（投递前把 AI 回复译成客户语言）。
+
+    从 main.py initialize() 原样抽出（行为不变）：未启用/装配失败返回 None。
+    translation_service 懒取（worker 真正投递时早已挂到 web_app.state）。
+    """
+    try:
+        from src.inbox.outbound_translate import (
+            parse_outbound_translate_cfg as _parse_otx_cfg,
+        )
+        _otx_cfg = _parse_otx_cfg(assistant.config.config or {})
+        if not _otx_cfg.get("enabled"):
+            return None
+        _otx_src = _otx_cfg.get("source_lang") or "zh"
+        _otx_style = _otx_cfg.get("style") or "chat"
+
+        async def _autosend_translate(item, _src=_otx_src, _style=_otx_style):
+            from src.inbox.outbound_translate import (
+                translate_outbound_text as _tot,
+            )
+            _ts = getattr(web_app.state, "translation_service", None)
+            if _ts is None:
+                return str(item.get("text", ""))
+            return await _tot(
+                item, translation_service=_ts,
+                store=assistant.inbox_store,
+                source_lang=_src, style=_style)
+
+        assistant.logger.info(
+            "AutosendWorker 出站自动翻译已启用（src=%s）", _otx_src)
+        return _autosend_translate
+    except Exception:
+        assistant.logger.debug("出站自动翻译装配跳过", exc_info=True)
+        return None
+
+
+def build_autosend_callbacks(assistant, web_app, deliver_enabled):
+    """构造 AutosendWorker 的 (send_callback, translate_callback)。
+
+    从 main.py initialize() 原样抽出（行为不变）。deliver 编排「按需发图→语音→
+    文本/桌面受控出站」三级投递；deliver_enabled=False 时 send_cb=None（仅 DB
+    标记+审计，不发客户）。translate_cb 见 build_autosend_translate_cb。
+    """
+    send_cb = None
+    if deliver_enabled:
+        from types import SimpleNamespace as _SNS
+        from src.inbox.channel_adapters import (
+            send_via_adapters as _send_via,
+            default_inbox_adapters as _dia,
+        )
+        _send_adapters = _dia()
+        _send_shim = _SNS(app=web_app)
+        _assistant_ref = assistant
+
+        async def _try_autosend_voice(platform, account_id, chat_key, text):
+            return await autosend_voice(_assistant_ref, platform, account_id, chat_key, text)
+
+        async def _try_autosend_image(platform, account_id, chat_key, text):
+            return await autosend_image(_assistant_ref, platform, account_id, chat_key, text)
+
+        async def _autosend_deliver(
+            platform, account_id, chat_key, text
+        ):
+            # 全自动「按需发图」优先（gated）：对方在要照片时先出图发出，
+            # 成功即作为图片发出、跳过语音/文本；未启用/不满足/失败 → 继续走语音/文本。
+            try:
+                if await _try_autosend_image(
+                    platform, account_id, chat_key, text
+                ):
+                    return {"ok": True, "delivered_as": "image"}
+            except Exception:
+                _assistant_ref.logger.debug(
+                    "[autosend image] 失败，回落语音/文本", exc_info=True)
+            # 全自动语音优先（gated）：成功即作为语音发出；
+            # 未启用/不满足/失败 → 回落到下面的文本投递（零行为变更）。
+            try:
+                if await _try_autosend_voice(
+                    platform, account_id, chat_key, text
+                ):
+                    return {"ok": True, "delivered_as": "voice"}
+            except Exception:
+                _assistant_ref.logger.debug(
+                    "[autosend voice] 失败，回落文本", exc_info=True)
+            # D4：桌面内嵌账号无服务端 worker，send_via_adapters 发不出去。
+            # desktop_bridge 开启时把回复路由到「受控出站队列」——enqueue 内部
+            # 先过 send-gate/kill-switch 闸门，通过才落队列，由桌面壳/扩展轮询
+            # DOM 发送。被闸门拦截则返回 ok=False，让 worker 记 autosend_failed。
+            try:
+                _cfg = _assistant_ref.config.config or {}
+                _br = ((_cfg.get("inbox", {}) or {}).get(
+                    "l2_autosend", {}) or {}).get(
+                    "desktop_bridge", {}) or {}
+                if (_br.get("enabled", False)
+                        and _is_desktop_account(platform, account_id)):
+                    from src.inbox.desktop_outbound import (
+                        get_desktop_outbound_queue as _gdoq,
+                    )
+                    from src.integrations.account_registry import (
+                        get_account_registry as _gar2,
+                    )
+                    # 人审模式（review_mode）：命令落 held 等运营放行，
+                    # 而非直接 pending 自动发。仍先过闸门（受控不变式）。
+                    _review = bool(_br.get("review_mode", False))
+                    _res = _gdoq().enqueue(
+                        platform, account_id, chat_key, text,
+                        config=_cfg, registry=_gar2(),
+                        hold=_review,
+                    )
+                    if _res.get("enqueued"):
+                        return {"ok": True,
+                                "delivered_as": (
+                                    "desktop_review"
+                                    if _res.get("status") == "held"
+                                    else "desktop_queued"),
+                                "id": _res.get("id")}
+                    return {"ok": False,
+                            "error": "blocked:" + str(
+                                _res.get("blocked") or "")}
+            except Exception:
+                _assistant_ref.logger.debug(
+                    "[autosend desktop_bridge] 路由失败", exc_info=True)
+            # AutosendWorker 跑在主 loop；而协议号(telegram/whatsapp
+            # pyrogram/Baileys)的 worker 由编排器经 FastAPI startup
+            # 钩子启动，活在「web 线程的 web_loop」上。直接在主 loop
+            # await orch.send → client.send_message 会触发
+            # "Future attached to a different loop"。故：编排器拥有
+            # 该账号时，把整次投递调度到 web_loop 执行再跨线程取回。
+            def _make_coro():
+                return _send_via(
+                    _send_shim, platform, account_id,
+                    chat_key, text, _send_adapters,
+                )
+            _wl = getattr(_assistant_ref, "_web_loop", None)
+            _orch_owns = False
+            try:
+                from src.integrations.account_orchestrator import (
+                    get_orchestrator as _get_orch,
+                )
+                _orch_owns = _get_orch(
+                    _assistant_ref.config.config or {}
+                ).owns(platform, account_id)
+            except Exception:
+                _orch_owns = False
+            if (_orch_owns and _wl is not None
+                    and _wl.is_running()):
+                _fut = asyncio.run_coroutine_threadsafe(
+                    _make_coro(), _wl
+                )
+                return await asyncio.wrap_future(_fut)
+            return await _make_coro()
+
+        send_cb = _autosend_deliver
+    translate_cb = build_autosend_translate_cb(assistant, web_app)
+    return send_cb, translate_cb
