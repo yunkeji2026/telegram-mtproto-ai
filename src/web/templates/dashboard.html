@@ -155,6 +155,7 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
     card.style.borderLeft='4px solid '+m.fg;
     document.getElementById('lic-icon').textContent=m.icon;
     var title=planName(d.plan);
+    if(d.trial) title+=' · '+window.T('db_js_lic_trial');
     if(d.customer) title+=' · '+d.customer;
     if(d.days_left!=null && d.state!=='unlicensed') title+=(d.days_left>=0?'（'+window.T('db_js_011')+' '+d.days_left+' '+window.T('db_js_012'):'（'+window.T('db_js_013')+' '+(-d.days_left)+' '+window.T('db_js_012'));
     document.getElementById('lic-title').textContent=title;
@@ -162,6 +163,7 @@ a.stat-card:hover .s-lbl::after{content:' →';color:var(--p)}
     if(!sub && d.state==='active') sub=window.T('db_js_014')+(d.expires_at? '':' · '+window.T('db_js_015'));
     if(d.seats) sub+=(sub?' · ':'')+window.T('db_js_016')+' '+d.seats;
     if(d.channels&&d.channels.length) sub+=(sub?' · ':'')+window.T('db_js_017')+' '+d.channels.join('/');
+    if(d.quota && d.quota.included_chars>0) sub+=(sub?' · ':'')+window.T('db_js_lic_chars')+' '+((d.quota.used_chars||0).toLocaleString())+'/'+(d.quota.included_chars.toLocaleString());
     document.getElementById('lic-sub').textContent=sub;
     var b=document.getElementById('lic-badge');
     b.textContent=m.label; b.style.background=m.bg; b.style.color=m.fg;

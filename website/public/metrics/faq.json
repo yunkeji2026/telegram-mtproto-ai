@@ -1,0 +1,11 @@
+{
+  "key": "faq",
+  "label": {
+    "zh": "FAQ 自解决率",
+    "en": "FAQ self-resolution rate"
+  },
+  "cmd": "python -m scripts.run_eval --faq --json",
+  "status": "skipped",
+  "note": "[note] FAQ 评测需 KB：用 --kb-db 指定 sqlite，或确保 config/knowledge_base.db 存在。当前 KB 不可用，跳过。",
+  "generated_at": "2026-07-11T10:27:52+0800"
+}

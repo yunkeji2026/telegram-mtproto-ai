@@ -347,6 +347,26 @@ class TTSPipeline:
         else:
             cache_key = ""
 
+        # ── P0-4 字符额度闸门：额度用尽且 licensing.enforce 开 → 阻断本次合成 ──
+        # （缓存命中不扣：无新增合成成本）。返回稳定错误码，autosend/路由按 TTS 失败
+        # 回落文字/出 i18n 提示，绝不阻断消息投递。闸门自身异常 → 放行。
+        if self.enabled and text_s.strip():
+            try:
+                from src.licensing.quota_store import (
+                    QUOTA_EXCEEDED_ERROR,
+                    check_license_quota,
+                )
+
+                if not check_license_quota()["allowed"]:
+                    return TTSResult(
+                        ok=False, text=text_s,
+                        provider=self._effective_backend(),
+                        voice=voice or self._effective_voice(),
+                        format=self.format, error=QUOTA_EXCEEDED_ERROR,
+                    )
+            except Exception:
+                pass
+
         rv = await self._synthesize_uncached(
             text_s, voice=voice, timeout_sec=timeout_sec, spec=spec)
 
@@ -359,6 +379,14 @@ class TTSPipeline:
                     _tts_cache_put(
                         cache_key, (data, rv.format, rv.provider, rv.voice),
                         max_entries=self.cache_max_entries)
+            except Exception:
+                pass
+        # P0-4：成功合成后按文本字符记额度（无额度授权零开销；绝不抛）
+        if rv.ok:
+            try:
+                from src.licensing.quota_store import record_license_chars
+
+                record_license_chars("tts", len(text_s))
             except Exception:
                 pass
         self._record_stats(rv, text_s, cache_hit=False, spec=spec)

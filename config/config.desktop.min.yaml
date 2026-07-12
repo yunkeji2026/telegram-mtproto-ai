@@ -1,0 +1,59 @@
+# ── 桌面首启最小配置种子（P0-1 A1）────────────────────────────────────────────
+# 打包桌面端（PyInstaller sidecar）首次运行时，由 ConfigManager._ensure_seeded 把本文件
+# 播种为用户可写目录的 config.yaml（优先于完整 config.example.yaml）。
+#
+# 设计原则：
+#   · 不带任何占位假值（api_id / api_key 等一律留空）——留空字段由「桌面首启向导」写
+#     overlay（config.local.yaml）补齐，本文件播种后即不再被程序改写（注释永续）。
+#   · 只保留「装好→填 AI Key→翻译生效」必需的最小集；未列出的键一律走代码默认，
+#     所有危险/RPA/协议子系统开关（line_rpa / messenger_rpa / whatsapp_rpa / contacts /
+#     platform_login / monetization / realtime_voice …）保持代码默认 = 关。
+#   · web_admin 的 host/port/auth_token 会被桌面壳 launcher 注入的 AITR_WEB_HOST /
+#     AITR_WEB_PORT / AITR_WEB_TOKEN 环境变量覆盖（serve↔talk 强一致）；此处的静态默认
+#     与桌面壳 config.json 缺省（127.0.0.1:18799 / admin）对齐，无 env 时也能直连。
+
+# Telegram 协议号（桌面模式默认不用；留空 = 跳过协议客户端初始化，收件箱/翻译不受影响）
+telegram:
+  api_id: ""
+  api_hash: ""
+  phone_number: ""
+  session_name: "desktop"
+
+# AI 大模型（桌面首启向导收集 api_key 后写 overlay，本文件保持留空）
+ai:
+  provider: "openai_compatible"     # gemini | openai_compatible（DeepSeek/Ollama/vLLM 走这条）
+  api_key: ""                       # ← 首启向导写 config.local.yaml overlay，勿手改本文件
+  base_url: "https://api.deepseek.com"
+  model: "deepseek-chat"
+  temperature: 0.7
+  max_tokens: 1024
+  timeout: 30
+
+# 技能集（回复产线用；与 example 同款默认，不含 test 技能）
+skills:
+  enabled:
+    - greeting
+    - order_query
+    - price_check
+    - status_check
+    - channel_info
+    - complaint
+    - small_talk
+
+# Web 后台（统一收件箱 / 翻译 / 桌面壳路由都挂其下；桌面模式 AITR_DESKTOP_MODE=1 会强制 enabled）
+web_admin:
+  enabled: true
+  host: 127.0.0.1                   # 桌面壳 launcher 经 AITR_WEB_HOST 覆盖
+  port: 18799                       # 桌面壳 launcher 经 AITR_WEB_PORT 覆盖（与 config.json 默认对齐）
+  auth_token: admin                 # 桌面壳 launcher 经 AITR_WEB_TOKEN 覆盖（与 config.json 默认对齐）
+
+# 翻译：只填 ai.* 即可用（首启向导保存 Key 后「翻译生效」的最短路径）
+translation:
+  engines:
+    order: ["ai"]
+    timeout_sec: 8
+
+# 统一收件箱持久层（安全默认开；与 example 对齐）
+inbox:
+  enabled: true
+  read_from_store: true

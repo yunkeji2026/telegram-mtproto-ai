@@ -1,0 +1,80 @@
+{
+  "key": "intent",
+  "label": {
+    "zh": "意图识别准确率（规则基线）",
+    "en": "Intent accuracy (rule baseline)"
+  },
+  "cmd": "python -m scripts.run_eval --json",
+  "status": "pass",
+  "report": {
+    "metrics": {
+      "total": 24,
+      "correct": 24,
+      "accuracy": 1.0,
+      "macro_f1": 1.0,
+      "per_label": {
+        "不满/投诉": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 2
+        },
+        "停止联系": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 3
+        },
+        "打招呼": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 4
+        },
+        "提问": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 4
+        },
+        "短句接话": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 4
+        },
+        "空消息": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 2
+        },
+        "继续聊天": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 2
+        },
+        "需要安抚": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 3
+        }
+      },
+      "confusion": {
+        "打招呼->打招呼": 4,
+        "停止联系->停止联系": 3,
+        "需要安抚->需要安抚": 3,
+        "不满/投诉->不满/投诉": 2,
+        "短句接话->短句接话": 4,
+        "提问->提问": 4,
+        "继续聊天->继续聊天": 2,
+        "空消息->空消息": 2
+      }
+    },
+    "threshold": 0.85,
+    "passed": true
+  },
+  "generated_at": "2026-07-11T10:27:52+0800"
+}

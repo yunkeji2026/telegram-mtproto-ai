@@ -248,6 +248,49 @@ ipcMain.handle("desktop:backend-health", async () => {
   }
 });
 
+// ── P0-1 首启向导：AI Key 状态 / 测试 / 保存（主进程转发，规避 renderer CSP/CORS）──
+// 保存走后端 POST /api/setup/ai-key → 写 config.local.yaml overlay（不动主 config 注释）
+// 并热重建后端 AI 运行时（翻译免重启生效）。
+ipcMain.handle("desktop:setup-ai-status", async () => {
+  const { base_url, token } = config.backend || {};
+  try {
+    const r = await fetch(`${base_url}/api/setup/ai`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return await r.json();
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+});
+
+ipcMain.handle("desktop:setup-test-ai", async (_e, body) => {
+  const { base_url, token } = config.backend || {};
+  try {
+    const r = await fetch(`${base_url}/api/setup/test-ai`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body || {}),
+    });
+    return await r.json();
+  } catch (e) {
+    return { ok: false, msg: String((e && e.message) || e) };
+  }
+});
+
+ipcMain.handle("desktop:setup-save-ai-key", async (_e, body) => {
+  const { base_url, token } = config.backend || {};
+  try {
+    const r = await fetch(`${base_url}/api/setup/ai-key`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body || {}),
+    });
+    return await r.json();
+  } catch (e) {
+    return { ok: false, detail: String((e && e.message) || e) };
+  }
+});
+
 ipcMain.handle("desktop:copy", (_e, text) => {
   try {
     clipboard.writeText(String(text || ""));

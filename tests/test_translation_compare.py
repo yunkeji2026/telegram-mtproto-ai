@@ -127,3 +127,112 @@ async def test_service_compare_does_not_pollute_cache():
     await svc.compare_translations("hello", target_lang="zh", source_lang="en")
     # 对照不写 L1 缓存（择优后才由正常 translate 落库）
     assert len(svc._cache) == before
+
+
+# ── P0-2：置信度透传（B1 对照候选 / B2 单条 translate）───────────────────────
+
+def _svc_with(*engines):
+    from src.ai.translation_service import TranslationService
+
+    svc = TranslationService(ai_client=None)
+    svc._router = EngineRouter(list(engines))
+    return svc
+
+
+async def test_compare_candidates_carry_confidence_fields():
+    # good：真译中文；echo：原样回吐（未翻译 → 低置信）；down：不可用（不评分）
+    svc = _svc_with(
+        _StubEngine("ai", out="你好，最近怎么样"),
+        _StubEngine("deepl", out="hello how are you"),
+        _StubEngine("google", available=False),
+    )
+    data = await svc.compare_translations(
+        "hello how are you", target_lang="zh", source_lang="en")
+    by = {c["engine"]: c for c in data["candidates"]}
+
+    good = by["ai"]
+    assert good["ok"] is True
+    assert 0.0 <= good["confidence"] <= 1.0
+    assert good["confidence_tier"] == "high"
+    assert good["confidence_signals"]["untranslated"] is False
+
+    echo = by["deepl"]  # 与原文相同 + 目标语脚本缺失 → low
+    assert echo["ok"] is True
+    assert echo["confidence"] < 0.5
+    assert echo["confidence_tier"] == "low"
+    assert echo["confidence_signals"]["untranslated"] is True
+
+    down = by["google"]  # 失败候选不评分（键不存在，前端徽标不渲染）
+    assert down["ok"] is False
+    assert "confidence" not in down and "confidence_tier" not in down
+
+
+async def test_translate_result_exposes_confidence():
+    svc = _svc_with(_StubEngine("ai", out="你好"))
+    res = await svc.translate("hello", target_lang="zh", source_lang="en")
+    assert res.ok
+    assert 0.0 <= res.confidence <= 1.0
+    d = res.to_dict()
+    assert d["confidence"] == res.confidence
+    # L1 缓存往返保留置信度（to_dict → kwargs 重建）
+    res2 = await svc.translate("hello", target_lang="zh", source_lang="en")
+    assert res2.cached is True and res2.confidence == res.confidence
+
+
+async def test_translate_identity_and_failure_not_scored():
+    # identity（同语种直返）与失败路径不评分 → -1，前端跳过低置信提示
+    svc = _svc_with(_StubEngine("ai", out="whatever"))
+    ident = await svc.translate("你好", target_lang="zh", source_lang="zh")
+    assert ident.provider == "identity" and ident.confidence == -1.0
+
+    svc2 = _svc_with(_StubEngine("ai", available=False))
+    fail = await svc2.translate("hello", target_lang="zh", source_lang="en")
+    assert fail.ok is False and fail.confidence == -1.0
+
+
+def _translate_app(svc):
+    from fastapi import FastAPI, Request
+    from src.web.routes.unified_inbox_translate_routes import register_translate_routes
+
+    app = FastAPI()
+
+    def api_auth(request: Request):
+        return True
+
+    register_translate_routes(app, api_auth=api_auth)
+    app.state.translation_service = svc
+    return app
+
+
+def test_translate_route_passes_confidence_through():
+    from fastapi.testclient import TestClient
+
+    svc = _svc_with(_StubEngine("ai", out="你好，最近怎么样"))
+    client = TestClient(_translate_app(svc))
+    r = client.post("/api/unified-inbox/translate",
+                    json={"text": "hello how are you", "target_lang": "zh",
+                          "source_lang": "en"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    conf = body["translation"]["confidence"]
+    assert isinstance(conf, float) and 0.0 <= conf <= 1.0
+
+
+def test_compare_route_passes_confidence_through():
+    from fastapi.testclient import TestClient
+
+    svc = _svc_with(
+        _StubEngine("ai", out="你好，最近怎么样"),
+        _StubEngine("deepl", out="hello how are you"),
+    )
+    client = TestClient(_translate_app(svc))
+    r = client.post("/api/unified-inbox/translate-compare",
+                    json={"text": "hello how are you", "target_lang": "zh",
+                          "source_lang": "en"})
+    assert r.status_code == 200
+    cands = r.json()["compare"]["candidates"]
+    by = {c["engine"]: c for c in cands}
+    assert by["ai"]["confidence_tier"] == "high"
+    assert by["deepl"]["confidence_tier"] == "low"
+    assert "confidence_signals" in by["ai"]

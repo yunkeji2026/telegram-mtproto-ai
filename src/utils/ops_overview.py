@@ -167,6 +167,7 @@ def assemble_ops_overview(
     companion: Optional[Dict[str, Any]] = None,
     orchestrator: Optional[Dict[str, Any]] = None,
     send_routes: Optional[Dict[str, Any]] = None,
+    inbound_translation: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """把四路 payload 装配成总览。
 
@@ -180,6 +181,8 @@ def assemble_ops_overview(
         companion:  陪伴能力配置体检（gather_companion_advice，可选）
         orchestrator: 账号编排器 status()（受管 worker 健康，可选）
         send_routes: SendRouteStats.dump()（出站路由回落率，信息量，可选）
+        inbound_translation: InboxStore.get_inbound_xlate_stats 输出（P0-3/B9 成本护栏
+            观测：入站自动译新译出/失败量 + 客户语言分布，可选）
     """
     roi = roi or {}
     billing = billing or {}
@@ -245,6 +248,9 @@ def assemble_ops_overview(
         "orchestrator_workers_running": int(orch_by_state.get("running") or 0),
         "send_fallback_rate": float(send_routes.get("fallback_rate") or 0.0),
         "send_total": int(send_routes.get("total") or 0),
+        # P0-3/B9 成本护栏：入站自动译量（窗口内新译出/失败条数，命中缓存不计）
+        "inbound_xlate_translated": int((inbound_translation or {}).get("translated") or 0),
+        "inbound_xlate_failed": int((inbound_translation or {}).get("failed") or 0),
     }
 
     return {
@@ -261,6 +267,7 @@ def assemble_ops_overview(
             "companion": companion or {},
             "orchestrator": orchestrator or {},
             "send_routes": send_routes,
+            "inbound_translation": inbound_translation or {},
         },
         "ts": time.time(),
     }

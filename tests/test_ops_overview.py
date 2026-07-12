@@ -253,3 +253,26 @@ def test_orchestrator_worker_light_yellow_on_transient_crash():
         ],
     }
     assert orchestrator_worker_light(status) == "yellow"
+
+
+# ── P0-3/B9：入站自动译量接入总览（成本护栏观测） ───────────────────────────
+
+def test_assemble_surfaces_inbound_translation_volume():
+    it = {"translated": 42, "failed": 3, "by_source_lang": {"en": 30, "ja": 12},
+          "trend": [{"day": "07-10", "translated": 42}]}
+    ov = assemble_ops_overview(
+        health={"light": "green"}, reliability={"light": "green"},
+        inbound_translation=it,
+    )
+    assert ov["kpis"]["inbound_xlate_translated"] == 42
+    assert ov["kpis"]["inbound_xlate_failed"] == 3
+    assert ov["sections"]["inbound_translation"] is it
+    # 纯观测：不影响总览灯
+    assert ov["overall_light"] == "green"
+
+
+def test_assemble_inbound_translation_absent_defaults_zero():
+    ov = assemble_ops_overview()
+    assert ov["kpis"]["inbound_xlate_translated"] == 0
+    assert ov["kpis"]["inbound_xlate_failed"] == 0
+    assert ov["sections"]["inbound_translation"] == {}

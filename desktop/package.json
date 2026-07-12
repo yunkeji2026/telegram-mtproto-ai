@@ -16,7 +16,7 @@
     "dist": "electron-builder",
     "dist:win": "electron-builder --win",
     "dist:mac": "electron-builder --mac",
-    "test": "node test/inject-status.test.js && node test/account-utils.test.js && node test/media-format.test.js && node test/webview-ua.test.js && node test/profiles.test.js && node test/fingerprint.test.js && node test/backend-launcher.test.js && node test/health-panel.test.js && node test/brand-util.test.js && node test/sidebar-chrome.test.js"
+    "test": "node test/inject-status.test.js && node test/account-utils.test.js && node test/media-format.test.js && node test/webview-ua.test.js && node test/profiles.test.js && node test/fingerprint.test.js && node test/backend-launcher.test.js && node test/health-panel.test.js && node test/brand-util.test.js && node test/sidebar-chrome.test.js && node test/first-run-model.test.js"
   },
   "devDependencies": {
     "electron": "^31.0.0",

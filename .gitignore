@@ -323,3 +323,8 @@ login_dump*.html
 # website 内的构建产物 / 依赖（.next、node_modules、out）由 website/.gitignore 负责忽略。
 !website/lib/
 !website/lib/**
+
+# 桌面后端 sidecar 构建脚本入库（覆盖上方通用 `build/` 忽略；构建产物仍忽略——
+# PyInstaller workpath `desktop/build/build/` 命中通用 `build/`，产出目录单列如下）
+!desktop/build/
+desktop/build/backend-dist/

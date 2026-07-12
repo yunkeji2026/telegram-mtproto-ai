@@ -15,6 +15,7 @@ from .gate import (
     channel_allowed,
     feature_allowed,
     is_write_blocked,
+    quota_exceeded,
     seat_block_on_online,
     seat_exceeded,
 )
@@ -28,6 +29,14 @@ from .license_manager import (
     get_license_manager,
     issue_license,
     reset_license_manager,
+)
+from .quota_store import (
+    LicenseQuotaStore,
+    check_license_quota,
+    configure_license_quota_store,
+    get_license_quota_store,
+    record_license_chars,
+    reset_license_quota_store,
 )
 
 __all__ = [
@@ -46,6 +55,14 @@ __all__ = [
     "channel_allowed",
     "feature_allowed",
     "is_write_blocked",
+    "quota_exceeded",
     "seat_block_on_online",
     "seat_exceeded",
+    # quota（P0-4 字符额度）
+    "LicenseQuotaStore",
+    "check_license_quota",
+    "configure_license_quota_store",
+    "get_license_quota_store",
+    "record_license_chars",
+    "reset_license_quota_store",
 ]

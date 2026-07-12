@@ -14,16 +14,18 @@
 ``<payload_b64url>.<signature_b64url>``（URL-safe base64 去 padding）。
 payload 为 JSON，字段：
 
-==========  ====================================================
-sub         客户标识（公司名）
-plan        community | basic | pro | flagship
-iat / exp   签发 / 到期 unix 秒；exp 省略或 0 = 永久
-seats       最大坐席席位（0 = 不限）
-channels    允许渠道列表，如 ["telegram","line","web"]
-features    功能位 dict，如 {"l4": true, "white_label": true}
-grace_days  到期后宽限天数（默认 7）
-lic_id      授权编号（便于吊销登记）
-==========  ====================================================
+==============  ====================================================
+sub             客户标识（公司名）
+plan            community | basic | pro | flagship
+iat / exp       签发 / 到期 unix 秒；exp 省略或 0 = 永久
+seats           最大坐席席位（0 = 不限）
+channels        允许渠道列表，如 ["telegram","line","web"]
+features        功能位 dict，如 {"l4": true, "white_label": true}
+grace_days      到期后宽限天数（默认 7）
+lic_id          授权编号（便于吊销登记）
+included_chars  含翻译/TTS 字符额度（0/省略 = 不限；P0-4 试用计量用）
+trial           是否试用授权（bool，仅标记/展示用）
+==============  ====================================================
 """
 
 from __future__ import annotations
@@ -138,6 +140,9 @@ class LicenseStatus:
     features: Dict[str, Any] = field(default_factory=dict)
     messages: List[str] = field(default_factory=list)
     enforce: bool = False  # C0-3：是否开启强制（来自 licensing.enforce）
+    # P0-4 免费试用（字符额度）：翻译/TTS 合计含量（0 = 不限）+ 试用标记
+    included_chars: int = 0
+    trial: bool = False
 
     @property
     def licensed(self) -> bool:
@@ -187,6 +192,8 @@ class LicenseStatus:
             "seats": self.seats,
             "channels": list(self.channels),
             "features": dict(self.features),
+            "included_chars": self.included_chars,
+            "trial": self.trial,
             "enforce": self.enforce,
             "read_only": self.read_only,
             "messages": list(self.messages),
@@ -220,6 +227,24 @@ class LicenseManager:
         with self._lock:
             self._enforce = bool(enforce)
             self._cached = None
+
+    @property
+    def license_path(self) -> Optional[str]:
+        """授权文件路径（C4 粘贴激活写入目标；可能为 None＝纯内联/env 模式）。"""
+        return self._path
+
+    def preview_token(self, token: str) -> LicenseStatus:
+        """校验一段授权码并返回其状态快照——**不写盘、不动单例缓存**。
+
+        C4 粘贴激活用：先 preview 确认 active/grace 再落盘，避免把无效/过期
+        key 写进 ``config/license.key`` 后系统反而降级。
+        """
+        return LicenseManager(
+            license_token=str(token or "").strip() or "-",
+            public_key_hex=self._public_key_hex,
+            enforce=self._enforce,
+            now_fn=self._now,
+        ).status()
 
     # -- 读取原始 token：优先内联 > 环境变量 > 文件 --
     def _read_token(self) -> Optional[str]:
@@ -306,6 +331,8 @@ class LicenseManager:
             seats=int(payload.get("seats") or 0),
             channels=list(payload.get("channels") or []),
             features=dict(payload.get("features") or {}),
+            included_chars=max(0, int(payload.get("included_chars") or 0)),
+            trial=bool(payload.get("trial", False)),
         )
         if not exp or now <= exp:
             st.state = "active"

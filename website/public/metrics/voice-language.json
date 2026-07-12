@@ -1,0 +1,19 @@
+{
+  "key": "voice-language",
+  "label": {
+    "zh": "语音合成语言一致性",
+    "en": "Voice language consistency"
+  },
+  "cmd": "python -m scripts.run_eval --voice-language --json",
+  "status": "pass",
+  "report": {
+    "summary": {
+      "total": 12,
+      "correct": 12,
+      "accuracy": 1.0
+    },
+    "acc_target": 1.0,
+    "passed": true
+  },
+  "generated_at": "2026-07-11T10:27:52+0800"
+}

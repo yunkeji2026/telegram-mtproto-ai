@@ -50,6 +50,28 @@
     <span id="sw-prog-text">{{ (i18n or {}).get('sw_s006', "已就绪") }} 0 / 0</span>
     <div class="bar"><i id="sw-prog-bar" style="width:0"></i></div>
   </div>
+  <!-- P0-1 A3：AI 大模型配置卡（golive AI 项 / workspace 引导条深链 #ai 落点；写 overlay + 热生效） -->
+  <div class="sw-card" id="ai">
+    <div class="sw-ch-hd" onclick="swToggle('ai')">
+      <div><div class="sw-ch-name">🔑 {{ (i18n or {}).get('setup.ai.card_title', 'AI 大模型') }}</div>
+      <div class="sw-ch-intro">{{ (i18n or {}).get('setup.ai.card_sub', '翻译 / 智能回复的引擎。只需一个 OpenAI 兼容 API Key（如 DeepSeek）。') }}</div></div>
+      <span class="sw-badge b-miss" id="sw-ai-badge">…</span>
+    </div>
+    <div class="sw-body" id="sw-body-ai">
+      <div class="sw-field"><label>{{ (i18n or {}).get('setup.ai.f_key', 'API Key') }} <span class="req">*</span></label>
+        <input id="sw-ai-key" type="password" autocomplete="off">
+        <div class="hint" id="sw-ai-key-cur"></div></div>
+      <div class="sw-field"><label>{{ (i18n or {}).get('setup.ai.f_base', '接口地址（base_url）') }}</label>
+        <input id="sw-ai-base" type="text" placeholder="https://api.deepseek.com"></div>
+      <div class="sw-field"><label>{{ (i18n or {}).get('setup.ai.f_model', '模型') }}</label>
+        <input id="sw-ai-model" type="text" placeholder="deepseek-chat"></div>
+      <div class="sw-actions">
+        <button class="sw-btn ghost" onclick="swAiTest(this)" style="border:1px solid var(--tk-border);cursor:pointer;">{{ (i18n or {}).get('setup.ai.btn_test', '测试连接') }}</button>
+        <button class="sw-btn primary" onclick="swAiSave(this)">{{ (i18n or {}).get('setup.ai.btn_save', '保存并生效') }}</button>
+        <span class="sw-msg" id="sw-ai-msg"></span>
+      </div>
+    </div>
+  </div>
   <div id="sw-list"></div>
   <div style="margin-top:18px;background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3);border-radius:12px;padding:14px 16px;font-size:13px;color:var(--tk-ok-ink);">
     {{ (i18n or {}).get('sw_s007', "渠道接好后，别忘了给 AI 喂知识") }} → <a href="/workspace/kb-start" style="color:var(--tk-ok-ink);font-weight:700;">{{ (i18n or {}).get('sw_s008', "知识库冷启动（一键播种起步话术）") }}</a>
@@ -144,5 +166,58 @@ function load(keepOpen){
   }).catch(function(){});
 }
 load();
+
+/* ── P0-1 A3：AI 大模型卡（状态回显 / 测试 / 保存 overlay + 热生效） ── */
+function swAiLoad(){
+  fetch('/api/setup/ai').then(function(r){return r.json();}).then(function(d){
+    if(!d||!d.ok) return;
+    var badge=document.getElementById('sw-ai-badge');
+    if(badge){
+      badge.className='sw-badge '+(d.configured?'b-ready':'b-miss');
+      badge.textContent=d.configured?('✓ '+window.T('setup.ai.st_configured')):window.T('setup.ai.st_missing');
+    }
+    var base=document.getElementById('sw-ai-base'), model=document.getElementById('sw-ai-model');
+    if(base && !base.value) base.value=d.base_url||'';
+    if(model && !model.value) model.value=d.model||'';
+    var cur=document.getElementById('sw-ai-key-cur');
+    if(cur && d.configured && d.api_key_masked) cur.textContent=window.Tf('sw_tf_cur',{v:d.api_key_masked});
+    // 未配置时自动展开卡片；带 #ai 深链（workspace 引导条跳来）时滚动定位
+    if(!d.configured){ var b=document.getElementById('sw-body-ai'); if(b) b.classList.add('open'); }
+    if(location.hash==='#ai'){ var c=document.getElementById('ai'); if(c) c.scrollIntoView({behavior:'smooth'}); }
+  }).catch(function(){});
+}
+function _swAiVals(){
+  return {
+    api_key:(document.getElementById('sw-ai-key').value||'').trim(),
+    base_url:(document.getElementById('sw-ai-base').value||'').trim(),
+    model:(document.getElementById('sw-ai-model').value||'').trim()
+  };
+}
+function swAiTest(btn){
+  var v=_swAiVals(), msg=document.getElementById('sw-ai-msg');
+  if(!v.api_key) v.api_key='_keep_';  // 未重填时用已保存 key 测
+  btn.disabled=true; msg.className='sw-msg'; msg.textContent=window.T('setup.ai.testing');
+  fetch('/api/setup/test-ai',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(v)}).then(function(r){return r.json();}).then(function(d){
+    btn.disabled=false;
+    if(d&&d.ok){ msg.className='sw-msg ok'; msg.textContent=window.T('setup.ai.test_ok'); }
+    else { msg.className='sw-msg err'; msg.textContent=(d&&(d.msg||d.detail))||window.T('draft.net_err'); }
+  }).catch(function(){ btn.disabled=false; msg.className='sw-msg err'; msg.textContent=window.T('draft.net_err'); });
+}
+function swAiSave(btn){
+  var v=_swAiVals(), msg=document.getElementById('sw-ai-msg');
+  if(!v.api_key){ msg.className='sw-msg err'; msg.textContent=window.T('err.auth.api_key_required'); return; }
+  btn.disabled=true; msg.className='sw-msg'; msg.textContent=window.T('setup.ai.saving');
+  fetch('/api/setup/ai-key',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(v)}).then(function(r){return r.json();}).then(function(d){
+    btn.disabled=false;
+    if(!d.ok){ msg.className='sw-msg err'; msg.textContent=d.detail||window.T('ov_js_save_fail'); return; }
+    msg.className='sw-msg '+(d.ai_ready?'ok':'err');
+    msg.textContent=d.ai_ready?window.T('setup.ai.saved_ready'):window.T('setup.ai.saved_not_ready');
+    document.getElementById('sw-ai-key').value='';
+    swAiLoad();
+  }).catch(function(){ btn.disabled=false; msg.className='sw-msg err'; msg.textContent=window.T('draft.net_err'); });
+}
+swAiLoad();
 </script>
 {% endblock %}

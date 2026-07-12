@@ -292,6 +292,7 @@
     <span style="color:var(--muted);font-size:.7rem">{{ (i18n or {}).get('ov_cap_preset_label','一键档：') }}</span>
     <button class="ov-cap-preset" data-preset="safe_default" style="font-size:.7rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="{{ (i18n or {}).get('ov_cap_preset_safe_title','急停：关全部对客外发，仅留安全栈') }}">🛑 {{ (i18n or {}).get('ov_cap_preset_safe','安全默认') }}</button>
     <button class="ov-cap-preset" data-preset="dry_run_trial" style="font-size:.7rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="{{ (i18n or {}).get('ov_cap_preset_dry_title','观测/翻译/worker 开，主动触达 dry_run 不真发') }}">🧪 {{ (i18n or {}).get('ov_cap_preset_dry','灰度试运行') }}</button>
+    <button class="ov-cap-preset" data-preset="nurture_mode" style="font-size:.7rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="{{ (i18n or {}).get('ov_cap_preset_nurture_title','灰度底座 + send-gate 预热爬坡 + 金丝雀白名单预先武装（不真发）') }}">🌱 {{ (i18n or {}).get('ov_cap_preset_nurture','养号模式') }}</button>
     <button class="ov-cap-preset" data-preset="full_auto" style="font-size:.7rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="{{ (i18n or {}).get('ov_cap_preset_full_title','全部开（真发仍受 auto_ai 护栏）') }}">🚀 {{ (i18n or {}).get('ov_cap_preset_full','全量真发') }}</button>
     <span style="color:var(--bd2)">|</span>
     <button id="ov-cap-rollback" style="font-size:.7rem;padding:.12rem .55rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="{{ (i18n or {}).get('ov_cap_rollback_title','回滚到上一次一键切换前') }}">↩ {{ (i18n or {}).get('ov_cap_rollback','回滚上次') }}</button>
@@ -303,6 +304,40 @@
   <div id="ov-cap-signals" style="display:none;margin-top:.4rem;font-size:.72rem;line-height:1.6;color:var(--muted)"></div>
   <div id="ov-cap-advice" style="display:none;margin-top:.4rem;font-size:.72rem;line-height:1.6;color:var(--muted)"></div>
   <div id="ov-cap-body" style="margin-top:.45rem;font-size:.76rem;line-height:1.5;color:var(--muted)">{{ (i18n or {}).get('rpa_loading','载入中…') }}</div>
+</div>
+
+<!-- P0-5 D8：反封号护栏运营面板（G1 Kill-Switch 三级急停 + G3 金丝雀放量；调既有 /api/ops/* 管理路由，写操作需 manage_ops 权限） -->
+<div id="ov-og-card" style="margin-top:.6rem;background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:.6rem .85rem">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem">
+    <div style="font-weight:600;font-size:.82rem">🛡 {{ (i18n or {}).get('ov_og_title','反封号护栏（急停 / 金丝雀）') }} <span id="ov-og-status" style="font-weight:400;color:var(--muted);font-size:.72rem"></span></div>
+    <button id="ov-og-refresh" style="font-size:.72rem;padding:.18rem .6rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="{{ (i18n or {}).get('ov_og_refresh_title','Kill-Switch：黑名单命中即停（global/platform/account 三级）；Canary：启用后白名单外账号一律 hold') }}">{{ (i18n or {}).get('refresh','刷新') }}</button>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:.7rem;margin-top:.45rem;font-size:.74rem;line-height:1.5">
+    <div>
+      <div style="font-weight:600">🛑 {{ (i18n or {}).get('ov_og_ks_head','紧急停发 Kill-Switch') }}</div>
+      <div id="ov-og-ks-list" style="margin-top:.25rem;color:var(--muted)">{{ (i18n or {}).get('rpa_loading','载入中…') }}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.4rem;align-items:center">
+        <input id="ov-og-ks-scope" placeholder="{{ (i18n or {}).get('ov_og_ks_scope_ph','global / platform:telegram / account:telegram:123') }}" style="flex:2 1 180px;font-size:.72rem;padding:.22rem .45rem;background:var(--input);border:1px solid var(--bd2);border-radius:6px;color:var(--t)">
+        <input id="ov-og-ks-reason" placeholder="{{ (i18n or {}).get('ov_og_ks_reason_ph','原因（写入审计）') }}" style="flex:2 1 140px;font-size:.72rem;padding:.22rem .45rem;background:var(--input);border:1px solid var(--bd2);border-radius:6px;color:var(--t)">
+        <select id="ov-og-ks-ttl" style="font-size:.72rem;padding:.22rem .3rem;background:var(--input);border:1px solid var(--bd2);border-radius:6px;color:var(--t)" title="{{ (i18n or {}).get('ov_og_ks_ttl_title','TTL 到点自动恢复，防「停了忘开」') }}">
+          <option value="0">{{ (i18n or {}).get('ov_og_ks_ttl_perm','TTL：永久') }}</option>
+          <option value="1800">{{ (i18n or {}).get('ov_og_ks_ttl_30m','TTL：30 分钟') }}</option>
+          <option value="7200">{{ (i18n or {}).get('ov_og_ks_ttl_2h','TTL：2 小时') }}</option>
+          <option value="86400">{{ (i18n or {}).get('ov_og_ks_ttl_24h','TTL：24 小时') }}</option>
+        </select>
+        <button id="ov-og-ks-set" style="font-size:.72rem;padding:.22rem .6rem;border:1px solid #dc2626;border-radius:6px;background:transparent;color:#dc2626;cursor:pointer">🛑 {{ (i18n or {}).get('ov_og_ks_set','置位停发') }}</button>
+      </div>
+    </div>
+    <div>
+      <div style="font-weight:600">🐤 {{ (i18n or {}).get('ov_og_cn_head','金丝雀放量 Canary') }}</div>
+      <div id="ov-og-cn-body" style="margin-top:.25rem;color:var(--muted)">{{ (i18n or {}).get('rpa_loading','载入中…') }}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.4rem;align-items:center">
+        <input id="ov-og-cn-members" placeholder="{{ (i18n or {}).get('ov_og_cn_members_ph','telegram:123, whatsapp:456…（裸 id 视为 telegram）') }}" style="flex:2 1 200px;font-size:.72rem;padding:.22rem .45rem;background:var(--input);border:1px solid var(--bd2);border-radius:6px;color:var(--t)">
+        <button id="ov-og-cn-add" style="font-size:.72rem;padding:.22rem .6rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer">＋ {{ (i18n or {}).get('ov_og_cn_add','扩面') }}</button>
+        <button id="ov-og-cn-clear" style="font-size:.72rem;padding:.22rem .6rem;border:1px solid var(--bd);border-radius:6px;background:transparent;color:inherit;cursor:pointer" title="{{ (i18n or {}).get('ov_og_cn_clear_title','清空自动/手动扩面集（不动 config 里的 pinned_accounts）') }}">🧹 {{ (i18n or {}).get('ov_og_cn_clear','清空扩面集') }}</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- D1c：桌面壳内嵌注入健康（逐选择器失配可观测，数据来自 /api/desktop/inject-health 信标）-->
@@ -1303,6 +1338,7 @@ function ovCapCalibrate(url){
 async function ovCapPreset(name, label){
   var WARN={safe_default:window.T('ov_js_warn_safe'),
             dry_run_trial:window.T('ov_js_warn_dry'),
+            nurture_mode:window.T('ov_js_warn_nurture'),
             full_auto:window.T('ov_js_warn_full')};
   if(!confirm(window.Tf('ov_js_preset_confirm',{label:label})+(WARN[name]||'')+window.T('ov_js_preset_confirm2'))) return;
   try{
@@ -1423,6 +1459,116 @@ async function ovCapToggle(btn){
     ovRefreshCapabilities();
   }catch(e){ alert(window.T('ov_js_req_fail')); btn.disabled=false; }
 }
+// P0-5 D8：反封号护栏面板（G1 Kill-Switch + G3 Canary，调既有 /api/ops/* 管理路由）。
+function _ovOgDel(path, body){
+  return fetch(path, {method:'DELETE', credentials:'include',
+    headers:{'Content-Type':'application/json','X-CSRF-Token':rpa.csrf()},
+    body: JSON.stringify(body||{})});
+}
+async function ovOgRefresh(){
+  var st=document.getElementById('ov-og-status');
+  var ksEl=document.getElementById('ov-og-ks-list'), cnEl=document.getElementById('ov-og-cn-body');
+  if(!ksEl || !cnEl){ return; }
+  try{
+    var ks=await rpa.get('/api/ops/kill-switch');
+    if(!ks || !ks.ok){ ksEl.textContent=window.T('ov_js_og_load_fail'); }
+    else if(!(ks.items||[]).length){
+      ksEl.innerHTML='<span style="color:#16a34a">✅ '+window.T('ov_js_og_ks_none')+'</span>';
+    }else{
+      ksEl.innerHTML=ks.items.map(function(it){
+        var exp=(it.expires_at&&Number(it.expires_at)>0)?(' · TTL→'+_ovCapEsc(window.wsFmtDateTime(it.expires_at))):'';
+        return '<div style="border-top:1px solid var(--bd);padding:.15rem 0"><code>'+_ovCapEsc(it.scope)+'</code>'
+          +(it.reason?(' · '+_ovCapEsc(it.reason)):'')+(it.actor?(' · '+_ovCapEsc(it.actor)):'')+exp
+          +' <button class="ov-og-ks-clear" data-scope="'+_ovCapEsc(it.scope)+'" style="font-size:.66rem;padding:.04rem .4rem;border:1px solid var(--bd);border-radius:5px;background:transparent;color:inherit;cursor:pointer">🔓 '+window.T('ov_js_og_ks_lift')+'</button></div>';
+      }).join('');
+    }
+    if(st){
+      st.textContent = (ks&&ks.frozen) ? window.T('ov_js_og_frozen')
+        : ((ks&&ks.count) ? window.Tf('ov_js_og_scopes_n',{n:ks.count}) : window.T('ov_js_og_all_clear'));
+    }
+    Array.prototype.forEach.call(ksEl.querySelectorAll('.ov-og-ks-clear'),function(b){
+      b.addEventListener('click',function(){ ovOgKsClear(b.getAttribute('data-scope')); });
+    });
+  }catch(e){ ksEl.textContent=window.T('ov_js_og_load_fail'); }
+  try{
+    var cn=await rpa.get('/api/ops/canary');
+    if(!cn || !cn.ok){ cnEl.textContent=window.T('ov_js_og_load_fail'); return; }
+    var mode=String(cn.mode||'manual');
+    var head=(cn.enabled
+        ? '<span style="color:#d97706">● '+window.T('ov_js_og_cn_on')+'</span>'
+        : '<span style="color:#9ca3af">○ '+window.T('ov_js_og_cn_off')+'</span>')
+      +' · '+window.T('ov_js_og_cn_mode')+_ovCapEsc(mode)
+      +' · '+window.Tf('ov_js_og_cn_n',{n:(cn.count||0)});
+    var removable = mode==='auto_health';   // manual 模式 cohort 来自 config pinned，× 不生效则不画
+    var chips=(cn.cohort||[]).map(function(m){
+      var rm=removable?(' <a href="#" class="ov-og-cn-rm" data-m="'+_ovCapEsc(m)+'" style="color:#dc2626;text-decoration:none">×</a>'):'';
+      return '<span style="display:inline-block;border:1px solid var(--bd);border-radius:999px;padding:.02rem .45rem;margin:.12rem .15rem 0 0"><code>'+_ovCapEsc(m)+'</code>'+rm+'</span>';
+    }).join('');
+    var hints=[];
+    if(cn.enabled && !(cn.cohort||[]).length){ hints.push(window.T('ov_js_og_cn_empty_hint')); }
+    if(mode!=='auto_health'){ hints.push(window.T('ov_js_og_cn_manual_hint')); }
+    cnEl.innerHTML='<div>'+head+'</div>'+(chips?('<div>'+chips+'</div>'):'')
+      +(hints.length?('<div style="margin-top:.2rem;color:var(--t3)">'+hints.map(_ovCapEsc).join('<br>')+'</div>'):'');
+    Array.prototype.forEach.call(cnEl.querySelectorAll('.ov-og-cn-rm'),function(a){
+      a.addEventListener('click',function(ev){ ev.preventDefault(); ovOgCnRemove(a.getAttribute('data-m')); });
+    });
+  }catch(e){ cnEl.textContent=window.T('ov_js_og_load_fail'); }
+}
+async function ovOgKsSet(){
+  var scopeEl=document.getElementById('ov-og-ks-scope'), reasonEl=document.getElementById('ov-og-ks-reason');
+  var scope=((scopeEl&&scopeEl.value)||'').trim()||'global';
+  var reason=((reasonEl&&reasonEl.value)||'').trim();
+  var ttlEl=document.getElementById('ov-og-ks-ttl');
+  var ttl=Number((ttlEl&&ttlEl.value)||0);
+  if(!confirm(window.Tf('ov_js_og_set_confirm',{scope:scope}))) return;
+  try{
+    var r=await rpa.post('/api/ops/kill-switch',{scope:scope,reason:reason,ttl_sec:ttl});
+    var d=await r.json();
+    if(!d||!d.ok){ alert((d&&(d.detail||d.message))||window.T('ov_js_og_op_fail')); return; }
+    if(reasonEl){ reasonEl.value=''; }
+    ovOgRefresh();
+  }catch(e){ alert(window.T('ov_js_req_fail')); }
+}
+async function ovOgKsClear(scope){
+  if(!confirm(window.Tf('ov_js_og_clear_confirm',{scope:scope||'global'}))) return;
+  try{
+    var r=await _ovOgDel('/api/ops/kill-switch',{scope:scope||'global'});
+    var d=await r.json();
+    if(!d||!d.ok){ alert((d&&(d.detail||d.message))||window.T('ov_js_og_op_fail')); return; }
+    ovOgRefresh();
+  }catch(e){ alert(window.T('ov_js_req_fail')); }
+}
+async function ovOgCnAdd(){
+  var inp=document.getElementById('ov-og-cn-members');
+  var raw=((inp&&inp.value)||'').trim();
+  if(!raw){ return; }
+  var members=raw.split(/[,，;；\s]+/).filter(function(s){ return !!s; });
+  try{
+    var r=await rpa.post('/api/ops/canary',{members:members});
+    var d=await r.json();
+    if(!d||!d.ok){ alert((d&&(d.detail||d.message))||window.T('ov_js_og_op_fail')); return; }
+    if(inp){ inp.value=''; }
+    ovOgRefresh();
+  }catch(e){ alert(window.T('ov_js_req_fail')); }
+}
+async function ovOgCnRemove(member){
+  if(!member){ return; }
+  try{
+    var r=await _ovOgDel('/api/ops/canary',{member:member});
+    var d=await r.json();
+    if(!d||!d.ok){ alert((d&&(d.detail||d.message))||window.T('ov_js_og_op_fail')); return; }
+    ovOgRefresh();
+  }catch(e){ alert(window.T('ov_js_req_fail')); }
+}
+async function ovOgCnClear(){
+  if(!confirm(window.T('ov_js_og_cn_clear_confirm'))) return;
+  try{
+    var r=await _ovOgDel('/api/ops/canary',{});
+    var d=await r.json();
+    if(!d||!d.ok){ alert((d&&(d.detail||d.message))||window.T('ov_js_og_op_fail')); return; }
+    ovOgRefresh();
+  }catch(e){ alert(window.T('ov_js_req_fail')); }
+}
 async function ovRefreshCapabilities(){
   var body=document.getElementById('ov-cap-body'), st=document.getElementById('ov-cap-status');
   if(body){ body.textContent=window.T('rpa_loading'); }
@@ -1513,6 +1659,16 @@ document.addEventListener('DOMContentLoaded', function(){
   var _cadBtn = document.getElementById('ov-cap-advice-btn');
   if(_cadBtn){ _cadBtn.addEventListener('click', function(){ ovCapAdvice(false); }); }
   ovRefreshCapabilities();
+  // 🛡 P0-5 D8：反封号护栏面板（kill-switch / canary，首屏拉一次 + 手动刷新）
+  var _ogR=document.getElementById('ov-og-refresh');
+  if(_ogR){ _ogR.addEventListener('click', ovOgRefresh); }
+  var _ogKs=document.getElementById('ov-og-ks-set');
+  if(_ogKs){ _ogKs.addEventListener('click', ovOgKsSet); }
+  var _ogCa=document.getElementById('ov-og-cn-add');
+  if(_ogCa){ _ogCa.addEventListener('click', ovOgCnAdd); }
+  var _ogCc=document.getElementById('ov-og-cn-clear');
+  if(_ogCc){ _ogCc.addEventListener('click', ovOgCnClear); }
+  ovOgRefresh();
   // D1c：桌面注入健康（按钮手动刷新 + 随主循环 ovRefresh 自动刷新）
   var _dhBtn = document.getElementById('ov-dh-refresh');
   if(_dhBtn){ _dhBtn.addEventListener('click', ovRefreshDesktopHealth); }

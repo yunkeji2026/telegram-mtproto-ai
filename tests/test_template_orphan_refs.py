@@ -27,14 +27,10 @@ _DOLLAR_IS_GEBI = re.compile(r"""\$\s*=\s*\(?\s*id\s*\)?\s*=>\s*document\.getEle
 
 # 当前在建/停用面板：markup 未落地，触发它们的 UI 也不存在 → 函数不可达、暂不崩。
 # 补上对应 markup（或移除死代码）后请从这里删除；test_pending_orphan_refs_still_orphan 会提醒。
-_PENDING_ORPHAN_REFS = {
-    # unified_inbox 的「声纹自助登记」内联面板 markup 未落地（toggleVoiceEnroll 以 if(!p)return 守卫入口）；
-    # 是一整套 window 暴露 + inbox.voice.* i18n 的连贯 staged 能力，且已有出货的副驾组件 cp-voice.js
-    # 走同源后端 API。「落地内联面板 or 判定被 cp-voice 取代后移除」属产品决策，非前端门禁线程职责 →
-    # 保留在此如实追踪（CI 绿、test_pending_orphan_refs_still_orphan 防其过期）。
-    # （personas 的 previewTTS 死代码已删除，其 vp-* 孤儿引用随之回收，门禁强度恢复。）
-    "unified_inbox.html": {"ve-lang", "ve-name", "ve-persona", "ve-rebind-from", "ve-rebind-to"},
-}
+# （P0-6/C8：unified_inbox 的「声纹自助登记」内联面板死代码已删除——markup 从未落地、
+#   同能力由出货副驾组件 cp-voice.js 承接；其 ve-* 孤儿引用随之回收，门禁强度恢复。
+#   personas 的 previewTTS 死代码更早已删。当前无 pending。）
+_PENDING_ORPHAN_REFS = {}
 
 
 def _defined_ids(html: str) -> set:

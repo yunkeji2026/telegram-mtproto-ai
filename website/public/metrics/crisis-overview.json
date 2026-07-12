@@ -1,0 +1,50 @@
+{
+  "key": "crisis-overview",
+  "label": {
+    "zh": "危机安全总览（全链合并门禁）",
+    "en": "Crisis safety overview"
+  },
+  "cmd": "python -m scripts.run_eval --crisis-overview --json",
+  "status": "pass",
+  "report": {
+    "links": {
+      "proactive_guard": {
+        "summary": {
+          "total": 13,
+          "accuracy": 1.0,
+          "severe_block_recall": 1.0,
+          "under_suppress": 0,
+          "over_suppress": 0
+        },
+        "passed": true
+      },
+      "crisis_response": {
+        "summary": {
+          "total": 7,
+          "override_need": 3,
+          "override_recall": 1.0,
+          "false_override": 0,
+          "directive_recall": 1.0,
+          "final_unsafe": 0
+        },
+        "passed": true
+      },
+      "resource_assurance": {
+        "summary": {
+          "total": 6,
+          "append_recall": 1.0,
+          "false_append": 0,
+          "duplicate": 0
+        },
+        "passed": true
+      }
+    },
+    "summary": {
+      "total_scenarios": 26,
+      "links_passed": 3,
+      "links_total": 3
+    },
+    "passed": true
+  },
+  "generated_at": "2026-07-11T10:27:52+0800"
+}

@@ -1,8 +1,9 @@
-// 三条产品线独立落地页内容（/voice /face /interpreting + /en/*）。
+// 产品线独立落地页内容（/voice /face /interpreting /asset-safe /nurture + /en/*）。
 // 设计原则：一页一卖点，媒体证据前置（真实引擎产出），CTA 直达 Telegram。
-// 指标口径与 engineContent.ts 保持一致——营销可以强，数字必须真。
+// 指标口径与 engineContent.ts / 主仓真实配置保持一致——营销可以强，数字必须真。
+// asset-safe / nurture 是「包装已有能力」页：只写已落地能力，路线图明说，不过度承诺。
 
-export type LandingKey = "voice" | "face" | "interpreting";
+export type LandingKey = "voice" | "face" | "interpreting" | "asset-safe" | "nurture";
 
 interface L {
   zh: string;
@@ -22,12 +23,15 @@ export interface LandingDict {
     accent: L;
     subtitle: L;
     points: L[]; // 3 个带勾要点
+    demoCta?: L; // hero 次级按钮文案（缺省「先看真实样片」）
   };
   demo: {
     title: L;
     subtitle: L;
     realNote: L; // “真实产出”说明
   };
+  // 无音视频样片的产品线（asset-safe / nurture）：demo 区改为逐条可当场验证的能力清单
+  demoBullets?: L[];
   caps: { title: L; desc: L; proof: L }[];
   steps: { title: L; desc: L }[];
   faq: { q: L; a: L }[];
@@ -388,6 +392,291 @@ export const LANDINGS: Record<LandingKey, LandingDict> = {
       desc: {
         zh: "30 分钟真机演示：用你的声音、你的行业词表现场双向同传，数据全程不出机房。",
         en: "30-minute live demo: two-way interpreting with your voice and your term list — data never leaves the room.",
+      },
+    },
+  },
+
+  "asset-safe": {
+    slug: "/asset-safe",
+    productLine: { zh: "客户资产保险箱 · 数据主权", en: "Customer asset vault · data sovereignty" },
+    seo: {
+      title: {
+        zh: "客户资产保险箱 · 跨渠道客户档案本地化 | 无界科技",
+        en: "Customer Asset Vault · Cross-channel CRM, fully on-prem | BOUNDLESS",
+      },
+      description: {
+        zh: "Telegram / WhatsApp / LINE / Messenger 客户资产沉到你自己的机器：Contact360 跨渠道全景（消息 + 互动时间轴 + 关系演进），多渠道身份合并/拆分，联系人一键 CSV 导出。本地 SQLite 存储，账号没了客户档案还在。",
+        en: "Your Telegram / WhatsApp / LINE / Messenger customer assets live on your own hardware: Contact360 cross-channel view (messages + interaction timeline + relationship stages), identity merge/split, one-click contacts CSV export. Local SQLite — lose an account, keep the customer file.",
+      },
+      keywords: ["客户资产", "私域流量", "客户数据本地化", "跨渠道CRM", "客户档案", "Contact360", "数据主权", "customer data ownership"],
+    },
+    hero: {
+      title: { zh: "平台账号会没，", en: "Platform accounts come and go —" },
+      accent: { zh: "客户资产必须是你的", en: "your customer assets must stay yours" },
+      subtitle: {
+        zh: "每一条消息、每一次互动、每一段关系演进，都归集成跨渠道客户档案，落在你自己机器的本地库里（SQLite，随时可备份可直读）。账号受限或换设备，客户是谁、聊到哪、答应过什么——档案都在。",
+        en: "Every message, interaction and relationship stage rolls up into one cross-channel customer file, stored in a local database on your own machine (SQLite — back it up or read it directly, any time). If an account gets restricted or you switch devices, who the customer is, where the conversation stood and what was promised — the file survives.",
+      },
+      points: [
+        { zh: "Contact360 跨渠道全景 · 消息/互动/关系一屏", en: "Contact360 cross-channel view · messages / timeline / stages" },
+        { zh: "本地 SQLite 存储 · 不经第三方服务器", en: "Local SQLite storage · no third-party servers" },
+        { zh: "联系人一键 CSV 导出 · 合并/拆分有审计", en: "One-click contacts CSV export · audited merge/split" },
+      ],
+      demoCta: { zh: "看它到底存了什么", en: "See what it actually stores" },
+    },
+    demo: {
+      title: { zh: "不是概念，后台里现成的", en: "Not a concept — it's in the console today" },
+      subtitle: {
+        zh: "以下每一条都能在 30 分钟真机演示里当场点给你看。",
+        en: "Every line below can be shown live in a 30-minute demo.",
+      },
+      realNote: {
+        zh: "以上为已上线能力的如实清单；标注「路线图」的功能以交付沟通为准，不含糊承诺。",
+        en: "An honest list of shipped capabilities; anything marked roadmap is agreed at delivery, never hand-waved.",
+      },
+    },
+    demoBullets: [
+      {
+        zh: "打开任一客户：跨渠道消息、互动时间轴、关系阶段演进一屏看全（Contact360）",
+        en: "Open any customer: cross-channel messages, interaction timeline and relationship stages on one screen (Contact360)",
+      },
+      {
+        zh: "同一客户在多平台的身份可合并成一份档案，合并错了可拆分回滚",
+        en: "Multi-platform identities merge into one file — and can be split back if merged wrong",
+      },
+      {
+        zh: "联系人列表一键导出 CSV，Excel 直接打开",
+        en: "Contacts list exports to CSV in one click, opens straight in Excel",
+      },
+      {
+        zh: "数据落在你机器的本地 SQLite 库（contacts / inbox），标准格式，随时整库备份",
+        en: "Data lives in local SQLite files (contacts / inbox) on your machine — standard format, back up the whole thing any time",
+      },
+    ],
+    caps: [
+      {
+        title: { zh: "Contact360 跨渠道客户全景", en: "Contact360 cross-channel view" },
+        desc: {
+          zh: "以客户为中心归集各渠道消息与互动：时间轴、关系阶段演进、备注画像一处看全，接手的人 5 分钟进入状态。",
+          en: "Customer-centric rollup of every channel: timeline, relationship-stage history and profile notes in one place — a new agent is up to speed in five minutes.",
+        },
+        proof: { zh: "消息 + 互动 + 关系演进 一屏", en: "Messages + timeline + stages, one screen" },
+      },
+      {
+        title: { zh: "数据主权：本地库存储", en: "Data sovereignty: local storage" },
+        desc: {
+          zh: "客户档案与会话落在你自己部署的 SQLite 本地库，不经我们服务器；标准格式可直读、可整库备份迁移。",
+          en: "Customer files and conversations live in SQLite on your own deployment — never on our servers. Standard format: read it directly, back it up, move it.",
+        },
+        proof: { zh: "本地 SQLite · 可直读可备份", en: "Local SQLite · readable & backupable" },
+      },
+      {
+        title: { zh: "多渠道身份合并 / 拆分", en: "Identity merge / split" },
+        desc: {
+          zh: "同一个客户的 Telegram、WhatsApp、LINE 身份合成一份档案；合并有审计、可拆分，不怕手滑。",
+          en: "One customer's Telegram, WhatsApp and LINE identities become a single file; merges are audited and reversible.",
+        },
+        proof: { zh: "合并可回退 · 操作有审计", en: "Reversible merges · full audit" },
+      },
+      {
+        title: { zh: "资产可带走：CSV 导出", en: "Take it with you: CSV export" },
+        desc: {
+          zh: "联系人清单一键导出 CSV。单客户完整档案 JSON 与消息批量导出在路线图上；交付即有的本地库可用标准 SQLite 工具直读。",
+          en: "Contacts export to CSV in one click. Per-customer JSON and bulk message export are on the roadmap; the local database is readable with standard SQLite tools from day one.",
+        },
+        proof: { zh: "CSV 现成 · 库文件标准格式", en: "CSV today · standard DB format" },
+      },
+    ],
+    steps: [
+      {
+        title: { zh: "接入你的渠道", en: "Connect your channels" },
+        desc: { zh: "Telegram / WhatsApp / LINE / Messenger 接入后，收发消息自动进本地库。", en: "Once Telegram / WhatsApp / LINE / Messenger are connected, every message lands in the local DB automatically." },
+      },
+      {
+        title: { zh: "档案自动归集", en: "Files build themselves" },
+        desc: { zh: "消息、互动、关系阶段自动归到客户名下；多渠道身份可合并成一人。", en: "Messages, interactions and stages roll up per customer; multi-channel identities merge into one person." },
+      },
+      {
+        title: { zh: "随时导出 / 备份", en: "Export / back up any time" },
+        desc: { zh: "联系人 CSV 一键导出；本地库文件整库备份，资产始终在你手里。", en: "One-click contacts CSV; back up the database files wholesale — the assets never leave your hands." },
+      },
+    ],
+    faq: [
+      {
+        q: { zh: "数据到底存在哪里？你们能看到吗？", en: "Where exactly is the data? Can you see it?" },
+        a: {
+          zh: "存在你自己部署环境的本地 SQLite 库里（客户档案与收件箱各一个库文件）。系统本地部署时数据不经我们的服务器，我们也没有访问通道。",
+          en: "In local SQLite files inside your own deployment (one for customer files, one for the inbox). With on-prem deployment the data never touches our servers, and we have no access path to it.",
+        },
+      },
+      {
+        q: { zh: "平台账号被封，客户资产还能保住吗？", en: "If a platform account gets banned, do I keep the assets?" },
+        a: {
+          zh: "能。档案、消息记录、关系阶段都在你的本地库里，不随平台账号消失。新账号接回后可以人工对照档案续联——目前不提供自动「换号续聊」，这点我们如实说。",
+          en: "Yes. Files, message history and relationship stages live in your local database — they don't vanish with the account. A new account can pick up the relationship manually using the file. We don't currently offer automatic account-switch continuation, and we say so plainly.",
+        },
+      },
+      {
+        q: { zh: "能导出哪些东西？", en: "What can I export?" },
+        a: {
+          zh: "联系人清单 CSV 一键导出已内置。单客户完整档案 JSON、消息批量导出在路线图上；等不及的话，本地 SQLite 库是标准格式，任何 SQLite 工具都能直读。",
+          en: "One-click contacts CSV is built in. Per-customer JSON and bulk message export are on the roadmap; if you can't wait, the local SQLite database is a standard format any SQLite tool can read.",
+        },
+      },
+    ],
+    finalCta: {
+      title: { zh: "让客户资产落到你自己的硬盘上", en: "Put your customer assets on your own disk" },
+      desc: {
+        zh: "30 分钟真机演示：现场看 Contact360 全景、合并拆分与 CSV 导出，指给你看数据库文件就在你机器上。",
+        en: "30-minute live demo: Contact360 in action, merge/split, CSV export — and we point at the database files sitting on your machine.",
+      },
+    },
+  },
+
+  nurture: {
+    slug: "/nurture",
+    productLine: { zh: "养号模式 · 反封号工程", en: "Nurture mode · anti-ban engineering" },
+    seo: {
+      title: {
+        zh: "养号模式 · 预热爬坡 / 健康红绿灯 / 一键急停 | 无界科技",
+        en: "Account Nurture Mode · Warm-up ramp / health lights / kill-switch | BOUNDLESS",
+      },
+      description: {
+        zh: "把养号做成工程：新号预热爬坡（默认第 0 天日发 2 条、14 天爬到 15 条）、账号健康红绿灯、红灯直接拒发、三级一键急停（TTL 自动恢复）、金丝雀白名单放量（默认关）、代理与指纹注入。一键切「养号模式」预设档。",
+        en: "Account nurturing as engineering: warm-up ramp for new accounts (default 2 sends on day 0, ramping to 15 over 14 days), health traffic lights with hard-stop on red, a three-level kill-switch with TTL auto-recovery, canary whitelist rollout (off by default), proxy & fingerprint injection. One click switches the whole preset.",
+      },
+      keywords: ["养号", "防封号", "账号预热", "风控", "金丝雀发布", "账号健康", "anti-ban", "account warmup"],
+    },
+    hero: {
+      title: { zh: "别再靠感觉养号，", en: "Stop nurturing accounts by gut feel —" },
+      accent: { zh: "把风控做成工程", en: "make risk control an engineering system" },
+      subtitle: {
+        zh: "新号自动从每天 2 条起步、14 天爬到目标量；账号健康算成红黄绿灯，红灯直接拒发；出事一键急停（全局/平台/单号三级，TTL 到点自动恢复）；放量走金丝雀白名单，绿灯稳定才扩面。每一条都是线上跑着的真实闸门，不是 PPT。",
+        en: "New accounts start at 2 sends a day and ramp to target over 14 days; account health becomes a red/amber/green light, and red refuses to send; one click freezes everything (global / platform / account, with TTL auto-recovery); volume ramps through a canary whitelist that only expands on stable green. Every one of these is a real gate running in production — not a slide.",
+      },
+      points: [
+        { zh: "预热爬坡：默认 2 条/天 → 14 天到 15 条/天（可配）", en: "Warm-up ramp: default 2/day → 15/day over 14 days (configurable)" },
+        { zh: "健康红绿灯 · 红灯拒发 · 封号信号自动停发", en: "Health lights · red refuses to send · ban signals auto-freeze" },
+        { zh: "三级一键急停 + 金丝雀白名单放量（默认关）", en: "3-level kill-switch + canary whitelist rollout (off by default)" },
+      ],
+      demoCta: { zh: "看看闸门长什么样", en: "See the actual gates" },
+    },
+    demo: {
+      title: { zh: "闸门是真的，后台里点得到", en: "Real gates you can click in the console" },
+      subtitle: {
+        zh: "以下全部来自主仓真实配置与运营面板，演示时逐条点给你看。",
+        en: "Everything below comes from real configuration and live ops panels — we click through each in the demo.",
+      },
+      realNote: {
+        zh: "参数为出厂默认值（target_cap=15 / warmup_start_cap=2 / warmup_ramp_days=14），均可按你的盘子调整；金丝雀默认关闭，由运营显式开启。",
+        en: "Figures are factory defaults (target_cap=15 / warmup_start_cap=2 / warmup_ramp_days=14), all tunable to your fleet; canary is off by default and enabled explicitly by ops.",
+      },
+    },
+    demoBullets: [
+      {
+        zh: "新号第 0 天日发上限 2 条，14 天线性爬到 15 条——超限当天直接拒发，不靠自觉",
+        en: "A new account caps at 2 sends on day 0 and ramps to 15 over 14 days — over the cap, sending is refused outright",
+      },
+      {
+        zh: "机群健康看板：活跃 / 预热中 / 受限封禁 红黄绿灯一屏，取最差账号亮总灯",
+        en: "Fleet health board: active / warming / restricted at a glance, overall light = worst account",
+      },
+      {
+        zh: "一键急停面板：global / platform / account 三级冻结，可带 TTL 到点自动恢复",
+        en: "Kill-switch panel: freeze at global / platform / account level, optional TTL auto-recovery",
+      },
+      {
+        zh: "金丝雀放量：启用后白名单外账号一律 hold，绿灯稳定才逐步扩面（默认关闭）",
+        en: "Canary rollout: when enabled, accounts outside the whitelist are held; expansion only on stable green (off by default)",
+      },
+      {
+        zh: "「养号模式」一键预设：预热闸 + 金丝雀白名单 + 只演练不真发，随时可回滚",
+        en: "One-click \"nurture mode\" preset: warm-up gate + canary whitelist + dry-run only, fully reversible",
+      },
+    ],
+    caps: [
+      {
+        title: { zh: "预热爬坡 · 新号不猛冲", en: "Warm-up ramp · no day-one blasting" },
+        desc: {
+          zh: "按账号天龄自动算当日上限：默认从 2 条/天线性爬到 15 条/天（14 天），全部可配；超限拒发而不是提醒。",
+          en: "Daily caps computed from account age: default ramp from 2/day to 15/day over 14 days, fully configurable — and over-cap means refusal, not a reminder.",
+        },
+        proof: { zh: "2 → 15 条/天 · 14 天 · 超限拒发", en: "2 → 15/day · 14 days · hard cap" },
+      },
+      {
+        title: { zh: "健康红绿灯 · 红灯拒发", en: "Health lights · red refuses" },
+        desc: {
+          zh: "天龄、代理、当日发送量、熔断信号算成健康分与红黄绿灯；红灯账号直接拒发，封号信号触发自动停发。",
+          en: "Account age, proxy, daily volume and circuit-breaker signals roll into a health score and light; red accounts are refused, and ban signals trigger an automatic freeze.",
+        },
+        proof: { zh: "红灯 = 拒发 · 封号信号自动停", en: "Red = refuse · ban signal auto-freeze" },
+      },
+      {
+        title: { zh: "三级一键急停 Kill-Switch", en: "Three-level kill-switch" },
+        desc: {
+          zh: "出事毫秒级冻结自动发送：全局 / 单平台 / 单账号三级作用域，重启不丢，可设 TTL 到点自动恢复，防「停了忘开」。",
+          en: "Freeze automated sending in milliseconds: global / platform / account scopes, survives restarts, optional TTL auto-recovery so a stop is never forgotten.",
+        },
+        proof: { zh: "三级作用域 · TTL 自动恢复", en: "3 scopes · TTL auto-recovery" },
+      },
+      {
+        title: { zh: "金丝雀放量 + 一键预设档", en: "Canary rollout + one-click presets" },
+        desc: {
+          zh: "放量先走白名单：启用金丝雀后白名单外一律 hold，绿灯稳定再扩面（默认关闭，运营显式开启）。「养号模式」预设一键把预热闸、金丝雀、只演练不真发整套摆好，可回滚。",
+          en: "Ramp through a whitelist: with canary on, everything outside it is held until green light holds (off by default, explicitly enabled by ops). The \"nurture mode\" preset arms warm-up gate + canary + dry-run in one click, reversibly.",
+        },
+        proof: { zh: "白名单放量 · 预设可回滚", en: "Whitelist rollout · reversible preset" },
+      },
+    ],
+    steps: [
+      {
+        title: { zh: "新号进预热档", en: "New accounts enter warm-up" },
+        desc: { zh: "一键切「养号模式」：预热闸开、金丝雀白名单武装好、主动触达只演练不真发。", en: "One click into nurture mode: warm-up gate on, canary whitelist armed, outreach in dry-run only." },
+      },
+      {
+        title: { zh: "看灯养号", en: "Nurture by the lights" },
+        desc: { zh: "机群看板盯红黄绿灯与预热进度；红灯自动拒发，异常一键急停。", en: "Watch the fleet board: lights and ramp progress. Red refuses automatically; anomalies get the kill-switch." },
+      },
+      {
+        title: { zh: "绿灯稳定再放量", en: "Ramp on stable green" },
+        desc: { zh: "把养熟的号加进金丝雀白名单逐步放量，爆炸半径始终受控。", en: "Add matured accounts to the canary whitelist and expand gradually — the blast radius stays contained." },
+      },
+    ],
+    faq: [
+      {
+        q: { zh: "金丝雀放量默认就开吗？", en: "Is canary rollout on by default?" },
+        a: {
+          zh: "默认关闭。启用后白名单外账号一律 hold（白名单为空时最保守=全部 hold），所以要由运营显式开启并指定白名单。「养号模式」预设会替你把它武装到 manual 白名单模式。",
+          en: "No — off by default. Once enabled, accounts outside the whitelist are held (an empty whitelist means everything is held, the most conservative stance), so ops enables it explicitly and pins the whitelist. The nurture preset arms it in manual whitelist mode for you.",
+        },
+      },
+      {
+        q: { zh: "开了这套就保证不封号吗？", en: "Does this guarantee no bans?" },
+        a: {
+          zh: "不保证，也没人能保证。这套是把「猛冲、红灯硬发、出事停不下来」这类高危动作工程化地挡住，把风险显著压低；号的内容与经营方式仍然是第一位的。",
+          en: "No — and nobody can honestly guarantee that. What this does is engineer away the high-risk behaviors (day-one blasting, sending through red lights, no e-stop when things go wrong) and cut the risk substantially; what you send and how you operate still matter most.",
+        },
+      },
+      {
+        q: { zh: "预热参数是死的吗？", en: "Are the warm-up numbers fixed?" },
+        a: {
+          zh: "不是。日发目标、起步上限、爬坡天数、红灯是否硬拒全部可配；出厂默认 2 条/天起步、14 天爬到 15 条/天，是我们实际在用的保守档。",
+          en: "No. Target volume, starting cap, ramp days and hard-stop-on-red are all configurable; the factory default (start at 2/day, ramp to 15/day over 14 days) is the conservative profile we run ourselves.",
+        },
+      },
+      {
+        q: { zh: "代理和设备指纹也管吗？", en: "What about proxies and fingerprints?" },
+        a: {
+          zh: "管。账号注册表按号绑定代理，桌面端注入设备指纹，健康分里代理是否配置也计分；这些同样是已上线能力。",
+          en: "Yes. The account registry binds a proxy per account, the desktop shell injects device fingerprints, and proxy hygiene feeds the health score — all shipped capabilities.",
+        },
+      },
+    ],
+    finalCta: {
+      title: { zh: "带一批新号来，现场进预热档", en: "Bring a batch of fresh accounts — we arm them live" },
+      desc: {
+        zh: "30 分钟真机演示：一键切养号模式、看板看灯、试一次急停与恢复，全程在你的部署上操作。",
+        en: "30-minute live demo on your deployment: switch to nurture mode, read the fleet lights, fire and lift a kill-switch — all hands-on.",
       },
     },
   },

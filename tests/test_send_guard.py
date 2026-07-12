@@ -79,6 +79,48 @@ def test_send_blocked_failopen_on_error(fresh_ks, monkeypatch):
     assert blocked is False and reason == ""
 
 
+# ── 金丝雀放量：编排器发送入口统一护栏（此前只接 B 线/官方链，编排器路径绕过）──
+
+def test_send_blocked_canary_disabled_passes(fresh_ks):
+    # canary 默认关 → 任何账号都不被 hold（零破坏）
+    blocked, _ = send_blocked("telegram", "8244899900",
+                              config={"ops": {"canary": {"enabled": False}}})
+    assert blocked is False
+
+
+def test_send_blocked_canary_holds_non_cohort(fresh_ks):
+    # canary 开 + 该号不在 pinned cohort → hold（放量爆炸半径控制对编排器路径生效）
+    cfg = {"ops": {"canary": {"enabled": True, "mode": "manual",
+                              "pinned_accounts": ["telegram:8244899900"]}}}
+    blocked, reason = send_blocked("telegram", "9999999999", config=cfg)
+    assert blocked is True
+    assert reason == "canary_hold"
+
+
+def test_send_blocked_canary_passes_pinned(fresh_ks):
+    # cohort 内账号放行（钉住的真号可继续发）
+    cfg = {"ops": {"canary": {"enabled": True, "mode": "manual",
+                              "pinned_accounts": ["telegram:8244899900"]}}}
+    blocked, reason = send_blocked("telegram", "8244899900", config=cfg)
+    assert blocked is False and reason == ""
+
+
+def test_send_blocked_canary_empty_cohort_holds_all(fresh_ks):
+    # canary 开但 cohort 空 → 全 hold（最保守，符合「先不放」语义）
+    cfg = {"ops": {"canary": {"enabled": True, "mode": "manual", "pinned_accounts": []}}}
+    blocked, reason = send_blocked("telegram", "8244899900", config=cfg)
+    assert blocked is True and reason == "canary_hold"
+
+
+def test_send_blocked_kill_switch_precedes_canary(fresh_ks):
+    # 急停优先于金丝雀：即便账号在 cohort，global 急停仍拦（查序＝KS→canary→gate）
+    fresh_ks.set("global", reason="全局冻结")
+    cfg = {"ops": {"canary": {"enabled": True, "mode": "manual",
+                              "pinned_accounts": ["telegram:8244899900"]}}}
+    blocked, reason = send_blocked("telegram", "8244899900", config=cfg)
+    assert blocked is True and reason == "kill_switch:global"
+
+
 # ── 编排器中心护栏 ───────────────────────────────────────────────────────────
 
 class _SendWorker:
