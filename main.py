@@ -195,6 +195,16 @@ class AIChatAssistant:
                             root_logger.addHandler(file_handler)
                     except Exception:
                         pass
+                    # ★★ src.* 命名空间的 INFO 也要落盘（2026-07-12 排障盲区修复）：
+                    # root 钉在 WARNING 防第三方库（httpx/uvicorn/pyrogram）刷屏，代价是
+                    # 本仓 src.* 业务模块的 INFO（「配置热重载完成」「入站翻译超时」
+                    # 「backfill 消化」…）在 app.log 全体隐身——线上行为无从追溯。
+                    # 单独给 "src" logger 挂同一 file handler（幂等/防重复行语义见模块单测）。
+                    try:
+                        from src.utils.log_setup import attach_src_file_handler
+                        attach_src_file_handler(file_handler, level=level)
+                    except Exception:
+                        pass
 
                 self.logger.info(f"日志已重新配置: level={log_level}, file={log_file}")
 
