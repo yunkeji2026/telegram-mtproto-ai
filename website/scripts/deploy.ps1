@@ -18,7 +18,7 @@ param(
   [string]$VpsHost      = $(if ($env:VPS_HOST) { $env:VPS_HOST } else { '165.154.233.121' }),
   [string]$User         = $(if ($env:VPS_USER) { $env:VPS_USER } else { 'ubuntu' }),
   [string]$RemoteDir    = '/home/ubuntu',
-  [string]$SiteUrl      = $(if ($env:SITE_URL) { $env:SITE_URL } else { 'https://usdt2026.cc' }),
+  [string]$SiteUrl      = $(if ($env:SITE_URL) { $env:SITE_URL } else { 'https://ai26.sbs' }),
   [string]$KeyFile      = $(if ($env:VPS_KEY) { $env:VPS_KEY } else { Join-Path $HOME '.ssh/hualing_deploy' })
 )
 

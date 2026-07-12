@@ -26,7 +26,7 @@ export function buildWelcome(lang: BotLang) {
 🤖 <b>AI 智能客服</b>：直接发消息问我，7×24 秒回（价格 / 方案 / 对接都能答）
 👤 <b>人工客服</b>：需要真人就点下方「人工客服」
 
-五条产品线：
+三大产品系：
 ${lines}
 · 🔐 <b>无界底座</b>：无审查私有部署，数据不出网
 
@@ -185,7 +185,7 @@ export function buildKnowledgeContext(lang: BotLang): string {
     .join(lang === "zh" ? "、" : "; ");
   parts.push(
     lang === "zh"
-      ? `公司：${BRAND.company.full}（${BRAND.company.tagline.zh}）。五条产品线：${lineSummary}。主推产品：智聊 ChatX 驱动的 AI 自动成交聊天系统。结算：全程 USDT。`
+      ? `公司：${BRAND.company.full}（${BRAND.company.tagline.zh}）。三大产品系：${lineSummary}。主推产品：智聊 ChatX 驱动的 AI 自动成交聊天系统。结算：全程 USDT。`
       : `Company: ${BRAND.company.full} (${BRAND.company.tagline.en}). Five product lines: ${lineSummary}. Flagship: AI Auto-Closing Chat System powered by ChatX. Settlement: USDT only.`
   );
 
@@ -231,7 +231,7 @@ export function systemPrompt(lang: BotLang): string {
     .map((it) => it.name)
     .join(lang === "zh" ? "、" : ", ");
   return lang === "zh"
-    ? `你是「${BRAND.company.full}」的专业 AI 售前客服（五条产品线：${names}）。只能根据下面提供的资料回答，不要编造价格、参数或承诺收益。
+    ? `你是「${BRAND.company.full}」的专业 AI 售前客服（三大产品系：${names}）。只能根据下面提供的资料回答，不要编造价格、参数或承诺收益。
 
 要求：
 - 【语言镜像】务必用「用户最新一条消息所用的语言」作答：用户用西班牙语/葡萄牙语/阿拉伯语/泰语/英语等，就用同种语言地道、口语化地回复（像本地母语销售，不要翻译腔）。用户用中文则用简体中文。
@@ -245,7 +245,7 @@ export function systemPrompt(lang: BotLang): string {
 
 资料：
 ${kb}`
-    : `You are the professional AI pre-sales agent for "${BRAND.company.full}" (five product lines: ${names}). Answer ONLY from the material below. Never invent prices, specs or guarantee returns.
+    : `You are the professional AI pre-sales agent for "${BRAND.company.full}" (product families: ${names}). Answer ONLY from the material below. Never invent prices, specs or guarantee returns.
 
 Rules:
 - [Language mirroring] ALWAYS reply in the SAME language as the user's latest message: if they write Spanish/Portuguese/Arabic/Thai/etc., reply fluently and idiomatically in that exact language (like a native salesperson, no translationese). If Chinese, reply in Simplified Chinese.

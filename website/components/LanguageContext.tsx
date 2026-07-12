@@ -43,12 +43,19 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
       if (typeof document !== "undefined") document.documentElement.lang = routeLang === "zh" ? "zh-CN" : "en";
       return;
     }
-    // Non-/en routes: honor saved preference (hl-lang, legacy yt-lang) then browser language.
+    // Non-/en routes: honor saved preference (hl-lang, legacy yt-lang) then system/device language.
+    // 目标市场=东南亚华人，只做中/英两种：手机/系统语言是中文 → zh，其余一律 → en。
+    // （navigator.languages 覆盖多语言用户；任一为中文即判中文。）
     const saved = (getLocal("hl-lang") ?? getLocal("yt-lang")) as Lang | null;
     if (saved === "zh" || saved === "en") {
       setLangState(saved);
-    } else if (typeof navigator !== "undefined" && navigator.language.startsWith("en")) {
-      setLangState("en");
+    } else if (typeof navigator !== "undefined") {
+      const prefs =
+        Array.isArray(navigator.languages) && navigator.languages.length
+          ? navigator.languages
+          : [navigator.language || ""];
+      const prefersChinese = prefs.some((l) => (l || "").toLowerCase().startsWith("zh"));
+      setLangState(prefersChinese ? "zh" : "en");
     }
   }, [routeLang]);
 

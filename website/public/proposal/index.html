@@ -1,0 +1,1065 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="robots" content="noindex, nofollow" />
+<title>无界 · 全球全自动引流系统 | 部署方案书 · BOUNDLESS</title>
+<meta name="description" content="无界科技 BOUNDLESS — 面向全球市场的 TikTok / Facebook 全自动引流与 AI 转化系统。真机集群 RPA + 多平台 AI 客服，硬件配置、产能测算、部署交付一体化解决方案。" />
+<meta name="theme-color" content="#05060f" />
+<link rel="icon" type="image/png" href="/proposal/assets/boundless-mark-256.png" />
+<link rel="apple-touch-icon" href="/proposal/assets/boundless-mark-256.png" />
+<!-- Open Graph / 社交分享预览（发 Telegram/WhatsApp/微信 链接时的卡片） -->
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="无界科技 BOUNDLESS" />
+<meta property="og:title" content="无界 · 全球全自动社媒引流与 AI 转化系统 · 部署方案书" />
+<meta property="og:description" content="真机集群 RPA × 多语言 AI 客服 —— TikTok / Facebook 全自动引流到成交。硬件配置、产能测算、部署交付一体化方案。" />
+<meta property="og:image" content="https://usdt2026.cc/proposal/assets/og.jpg" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:url" content="https://usdt2026.cc/proposal/" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="无界 · 全球全自动社媒引流与 AI 转化系统 · 部署方案书" />
+<meta name="twitter:description" content="真机集群 RPA × 多语言 AI 客服 —— TikTok / Facebook 全自动引流到成交。" />
+<meta name="twitter:image" content="https://usdt2026.cc/proposal/assets/og.jpg" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@300;400;500;700;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
+<style>
+:root{
+  --bg:#04050e; --bg2:#0a0c20; --bg3:#0f1230;
+  --card:rgba(19,22,52,.55); --card2:rgba(15,18,44,.75);
+  --border:rgba(139,92,246,.20); --border2:rgba(34,211,238,.28);
+  --cyan:#2dd4ee; --violet:#8b5cf6; --pink:#ec4899; --gold:#f5b942; --green:#2dd4bf;
+  --text:#eaf0fb; --muted:#9aa6c2; --dim:#66728f;
+  --grad:linear-gradient(110deg,#38e0f0,#6366f1,#a855f7,#38e0f0);
+  --grad2:linear-gradient(135deg,#2dd4ee,#7c6bf5);
+  --maxw:1200px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{
+  font-family:"Noto Sans SC","Sora",-apple-system,"Segoe UI",sans-serif;
+  background:var(--bg); color:var(--text); line-height:1.7;
+  overflow-x:hidden; letter-spacing:.2px;
+}
+h1,h2,h3,h4{font-family:"Sora","Noto Sans SC",sans-serif;font-weight:700;line-height:1.25;text-wrap:balance}
+a{color:inherit;text-decoration:none}
+::selection{background:rgba(139,92,246,.45);color:#fff}
+.mono{font-family:"JetBrains Mono",monospace}
+
+/* ===== Backgrounds ===== */
+#bg-canvas{position:fixed;inset:0;z-index:-3;opacity:.55}
+.bg-fixed{position:fixed;inset:0;z-index:-4;pointer-events:none;background:
+  radial-gradient(1100px 700px at 15% -5%,rgba(99,102,241,.20),transparent 60%),
+  radial-gradient(900px 600px at 92% 8%,rgba(45,212,238,.16),transparent 60%),
+  radial-gradient(1000px 800px at 50% 108%,rgba(124,107,245,.10),transparent 60%),
+  var(--bg);
+}
+.bg-grid{position:fixed;inset:0;z-index:-3;pointer-events:none;opacity:.4;
+  background-image:linear-gradient(rgba(99,102,241,.06) 1px,transparent 1px),linear-gradient(90deg,rgba(99,102,241,.06) 1px,transparent 1px);
+  background-size:48px 48px;
+  mask-image:radial-gradient(ellipse 80% 60% at 50% 0%,#000 30%,transparent 80%);
+  -webkit-mask-image:radial-gradient(ellipse 80% 60% at 50% 0%,#000 30%,transparent 80%);}
+.spotlight{position:fixed;width:520px;height:520px;border-radius:50%;pointer-events:none;z-index:-2;
+  background:radial-gradient(circle,rgba(34,211,238,.10),transparent 65%);transform:translate(-50%,-50%);transition:opacity .4s;opacity:0}
+
+/* ===== Progress + Nav ===== */
+#progress{position:fixed;top:0;left:0;height:3px;width:0;z-index:120;background:var(--grad);background-size:200% auto;box-shadow:0 0 14px rgba(34,211,238,.7)}
+header{position:fixed;top:0;left:0;right:0;z-index:100;transition:.35s}
+header.scrolled{background:rgba(6,8,22,.82);backdrop-filter:blur(16px);border-bottom:1px solid var(--border)}
+nav{max-width:var(--maxw);margin:0 auto;display:flex;align-items:center;justify-content:space-between;padding:16px 24px}
+.brand{display:flex;align-items:center;gap:11px;font-weight:800;font-size:19px;letter-spacing:.5px}
+.brand .logo{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;font-size:20px;font-weight:900;
+  background:var(--grad2);color:#04050e;box-shadow:0 6px 22px -6px rgba(139,92,246,.7)}
+.brand small{display:block;font-size:10px;color:var(--muted);font-weight:500;letter-spacing:2.5px}
+.navlinks{display:flex;gap:6px;align-items:center}
+.navlinks a{font-size:13.5px;color:var(--muted);padding:8px 13px;border-radius:9px;transition:.2s;font-weight:500}
+.navlinks a:hover{color:#fff;background:rgba(255,255,255,.05)}
+.navlinks a.active{color:#fff}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:11px;font-weight:600;font-size:14px;cursor:pointer;transition:.25s;border:none;font-family:inherit}
+.btn-primary{background:var(--grad2);color:#04050e;box-shadow:0 8px 26px -8px rgba(34,211,238,.6)}
+.btn-primary:hover{transform:translateY(-2px);box-shadow:0 12px 34px -8px rgba(34,211,238,.8)}
+.btn-ghost{background:rgba(255,255,255,.04);border:1px solid var(--border);color:var(--text)}
+.btn-ghost:hover{border-color:var(--border2);background:rgba(255,255,255,.08)}
+.nav-cta{display:flex;gap:10px;align-items:center}
+.burger{display:none;flex-direction:column;gap:5px;cursor:pointer;padding:8px}
+.burger span{width:24px;height:2px;background:#fff;border-radius:2px;transition:.3s}
+
+/* ===== Layout ===== */
+section{position:relative;padding:96px 24px}
+.wrap{max-width:var(--maxw);margin:0 auto}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;letter-spacing:2px;text-transform:uppercase;
+  color:var(--cyan);padding:7px 15px;border:1px solid var(--border2);border-radius:100px;background:rgba(34,211,238,.06);margin-bottom:22px}
+.eyebrow .dot{width:6px;height:6px;border-radius:50%;background:var(--cyan);box-shadow:0 0 10px var(--cyan);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+h2.title{font-size:clamp(28px,4vw,44px);margin-bottom:16px}
+.section-sub{color:var(--muted);font-size:16.5px;max-width:640px;margin-bottom:12px}
+.text-grad{background:var(--grad);background-size:200% auto;-webkit-background-clip:text;background-clip:text;color:transparent;animation:shimmer 6s linear infinite}
+@keyframes shimmer{to{background-position:200% center}}
+.center{text-align:center}
+.center .section-sub{margin-left:auto;margin-right:auto}
+
+/* reveal */
+.reveal{opacity:0;transform:translateY(30px);transition:opacity .8s cubic-bezier(.22,1,.36,1),transform .8s cubic-bezier(.22,1,.36,1)}
+.reveal.in{opacity:1;transform:none}
+.no-js .reveal{opacity:1;transform:none}
+.d1{transition-delay:.08s}.d2{transition-delay:.16s}.d3{transition-delay:.24s}.d4{transition-delay:.32s}.d5{transition-delay:.4s}
+
+/* ===== Hero ===== */
+.hero{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding-top:120px;padding-bottom:60px}
+.hero-badge{display:inline-flex;align-items:center;gap:9px;font-size:13px;color:var(--muted);padding:8px 16px;border:1px solid var(--border);border-radius:100px;background:var(--card);margin-bottom:28px;backdrop-filter:blur(8px)}
+.hero-badge b{color:var(--gold)}
+.hero h1{font-size:clamp(38px,6.5vw,76px);font-weight:800;letter-spacing:-1px;margin-bottom:24px}
+.hero p.lead{font-size:clamp(16px,2vw,21px);color:var(--muted);max-width:680px;margin-bottom:38px}
+.hero-cta{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:56px}
+.hero-cta .btn{padding:15px 30px;font-size:15.5px}
+.stats-bar{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border);border:1px solid var(--border);border-radius:18px;overflow:hidden}
+.stat{background:var(--card2);backdrop-filter:blur(10px);padding:26px 20px;text-align:center}
+.stat .num{font-size:clamp(26px,3.4vw,40px);font-weight:800;font-family:"Sora";background:var(--grad2);-webkit-background-clip:text;background-clip:text;color:transparent;letter-spacing:-1px}
+.stat .lbl{font-size:13px;color:var(--muted);margin-top:6px}
+.scroll-ind{position:absolute;bottom:26px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:8px;color:var(--dim);font-size:11px;letter-spacing:2px}
+.mouse{width:24px;height:38px;border:2px solid var(--dim);border-radius:14px;position:relative}
+.mouse::before{content:"";position:absolute;top:7px;left:50%;transform:translateX(-50%);width:4px;height:7px;background:var(--cyan);border-radius:3px;animation:scrolldot 1.8s infinite}
+@keyframes scrolldot{0%{opacity:1;top:7px}70%{opacity:0;top:18px}100%{opacity:0}}
+
+/* ===== Marquee ===== */
+.marquee{overflow:hidden;padding:28px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:rgba(10,12,32,.4);mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent);-webkit-mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent)}
+.marquee-track{display:inline-flex;gap:52px;white-space:nowrap;animation:scroll 28s linear infinite;align-items:center}
+.marquee:hover .marquee-track{animation-play-state:paused}
+@keyframes scroll{to{transform:translateX(-50%)}}
+.mq-item{display:inline-flex;align-items:center;gap:10px;font-size:16px;font-weight:600;color:var(--muted)}
+.mq-item .ic{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;font-size:15px;background:rgba(255,255,255,.05);border:1px solid var(--border)}
+
+/* ===== Cards grid ===== */
+.grid{display:grid;gap:22px}
+.g2{grid-template-columns:repeat(2,1fr)}
+.g3{grid-template-columns:repeat(3,1fr)}
+.g4{grid-template-columns:repeat(4,1fr)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:28px;backdrop-filter:blur(12px);transition:.3s;position:relative;overflow:hidden}
+.card:hover{transform:translateY(-5px);border-color:var(--border2);box-shadow:0 20px 50px -20px rgba(34,211,238,.3)}
+.card .ic-box{width:52px;height:52px;border-radius:13px;display:grid;place-items:center;font-size:24px;margin-bottom:18px;background:linear-gradient(135deg,rgba(34,211,238,.15),rgba(139,92,246,.15));border:1px solid var(--border)}
+.card h3{font-size:19px;margin-bottom:10px}
+.card p{color:var(--muted);font-size:14.5px}
+.card ul{list-style:none;margin-top:14px;display:flex;flex-direction:column;gap:8px}
+.card ul li{font-size:13.5px;color:var(--muted);padding-left:22px;position:relative}
+.card ul li::before{content:"";position:absolute;left:0;top:8px;width:12px;height:7px;border-left:2px solid var(--cyan);border-bottom:2px solid var(--cyan);transform:rotate(-45deg)}
+
+/* ===== Flow / pipeline ===== */
+.pipeline{display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin-top:20px}
+.flow-step{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px 16px;text-align:center;position:relative;transition:.3s}
+.flow-step:hover{border-color:var(--border2);transform:translateY(-4px)}
+.flow-step .n{position:absolute;top:-11px;left:50%;transform:translateX(-50%);width:26px;height:26px;border-radius:50%;background:var(--grad2);color:#04050e;font-weight:800;font-size:13px;display:grid;place-items:center}
+.flow-step .fic{font-size:28px;margin:8px 0 12px}
+.flow-step h4{font-size:15px;margin-bottom:6px}
+.flow-step p{font-size:12px;color:var(--dim);line-height:1.5}
+.flow-arrow{position:absolute;right:-11px;top:50%;transform:translateY(-50%);color:var(--cyan);font-size:18px;z-index:2}
+
+/* ===== Platform matrix ===== */
+.pf-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;align-items:stretch}
+.pcard{position:relative;background:var(--card);border:1px solid var(--border);border-radius:18px;padding:24px 22px;backdrop-filter:blur(12px);transition:transform .3s,border-color .3s,box-shadow .3s;overflow:hidden}
+.pcard:hover{transform:translateY(-5px);border-color:var(--border2);box-shadow:0 20px 46px -22px var(--b1,rgba(45,212,238,.45))}
+.pcard.dev{background:rgba(14,17,40,.45)}
+.picon{width:52px;height:52px;border-radius:14px;display:grid;place-items:center;margin-bottom:15px;background:linear-gradient(140deg,var(--b1),var(--b2));box-shadow:0 8px 20px -8px var(--b1)}
+.picon svg{width:28px;height:28px;fill:#fff}
+.pcard.dev .picon{filter:saturate(.9)}
+.pcard h4{font-size:17px;margin-bottom:6px}
+.pcard p{font-size:12.5px;color:var(--muted);line-height:1.55;margin:0}
+.pstatus{position:absolute;top:18px;right:18px;font-size:11px;font-weight:700;padding:5px 11px;border-radius:100px;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.pstatus.live{color:#5eead4;background:rgba(45,212,191,.12);border:1px solid rgba(45,212,191,.4)}
+.pstatus.live::before{content:"";width:7px;height:7px;border-radius:50%;background:#2dd4bf;box-shadow:0 0 8px #2dd4bf;animation:pulse 1.6s infinite}
+.pstatus.dev{color:#93a4c9;background:rgba(148,163,184,.08);border:1px solid rgba(148,163,184,.28)}
+.pstatus.dev::before{content:"+";font-size:13px;font-weight:800;line-height:1;color:#93a4c9}
+
+/* ===== Tabs (hardware) ===== */
+.tabs{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-bottom:36px}
+.tab-btn{padding:13px 26px;border-radius:12px;border:1px solid var(--border);background:var(--card);color:var(--muted);cursor:pointer;font-family:inherit;font-size:14.5px;font-weight:600;transition:.25s}
+.tab-btn:hover{color:#fff;border-color:var(--border2)}
+.tab-btn.active{background:var(--grad2);color:#04050e;border-color:transparent;box-shadow:0 8px 24px -8px rgba(34,211,238,.6)}
+.tab-btn small{display:block;font-size:11px;font-weight:500;opacity:.8;margin-top:2px}
+.tab-pane{display:none}
+.tab-pane.active{display:block;animation:fade .5s}
+@keyframes fade{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.bom-head{display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:16px;margin-bottom:20px}
+.bom-head h3{font-size:24px}
+.bom-head .pill{font-size:13px;color:var(--muted);padding:6px 14px;border:1px solid var(--border);border-radius:100px;background:var(--card)}
+table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden}
+th,td{padding:14px 18px;text-align:left;font-size:14px;border-bottom:1px solid rgba(255,255,255,.05)}
+th{background:rgba(139,92,246,.10);color:#fff;font-weight:600;font-size:13px;letter-spacing:.5px}
+td{color:var(--muted)}
+td.r,th.r{text-align:right;font-family:"JetBrains Mono"}
+tr:last-child td{border-bottom:none}
+tbody tr:hover{background:rgba(34,211,238,.04)}
+.tot-row td{background:rgba(34,211,238,.07);color:#fff;font-weight:700;font-size:15px}
+.tot-row td.r{color:var(--cyan)}
+
+/* ===== Calculator ===== */
+.calc{background:linear-gradient(135deg,rgba(19,22,52,.7),rgba(15,18,44,.85));border:1px solid var(--border2);border-radius:24px;padding:38px;backdrop-filter:blur(14px);position:relative;overflow:hidden}
+.calc::before{content:"";position:absolute;top:-50%;right:-20%;width:400px;height:400px;background:radial-gradient(circle,rgba(139,92,246,.15),transparent 70%);pointer-events:none}
+.calc-grid{display:grid;grid-template-columns:1fr 1fr;gap:38px;align-items:center;position:relative}
+.slider-label{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px}
+.slider-label span{font-size:15px;color:var(--muted)}
+.slider-label b{font-size:38px;font-family:"Sora";font-weight:800;background:var(--grad2);-webkit-background-clip:text;background-clip:text;color:transparent}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:8px;border-radius:100px;background:linear-gradient(90deg,var(--cyan),var(--violet));outline:none;cursor:pointer;margin:8px 0 6px}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:26px;height:26px;border-radius:50%;background:#fff;border:4px solid var(--cyan);box-shadow:0 0 16px rgba(34,211,238,.8);cursor:pointer}
+input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:#fff;border:4px solid var(--cyan);box-shadow:0 0 16px rgba(34,211,238,.8);cursor:pointer}
+.range-scale{display:flex;justify-content:space-between;font-size:11px;color:var(--dim)}
+.preset-btns{display:flex;gap:8px;margin-top:18px;flex-wrap:wrap}
+.preset-btns button{flex:1;padding:10px;border-radius:10px;border:1px solid var(--border);background:var(--card);color:var(--muted);cursor:pointer;font-family:inherit;font-size:13px;transition:.2s;font-weight:500}
+.preset-btns button:hover,.preset-btns button.on{border-color:var(--cyan);color:#fff;background:rgba(34,211,238,.1)}
+.calc-out{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.out-cell{background:var(--card2);border:1px solid var(--border);border-radius:14px;padding:18px}
+.out-cell .k{font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.out-cell .v{font-size:26px;font-weight:800;font-family:"Sora";color:#fff;margin-top:4px}
+.out-cell .v small{font-size:13px;color:var(--muted);font-weight:400}
+.out-cell.hl{border-color:var(--border2);background:linear-gradient(135deg,rgba(34,211,238,.1),rgba(139,92,246,.08))}
+.out-cell.hl .v{background:var(--grad2);-webkit-background-clip:text;background-clip:text;color:transparent}
+.calc-note{font-size:12px;color:var(--dim);margin-top:20px;text-align:center;position:relative}
+
+/* ===== Pricing ===== */
+.price-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+.price-card{background:var(--card);border:1px solid var(--border);border-radius:20px;padding:34px 28px;position:relative;transition:.3s;display:flex;flex-direction:column}
+.price-card:hover{transform:translateY(-6px);border-color:var(--border2)}
+.price-card.feat{border-color:var(--cyan);background:linear-gradient(160deg,rgba(34,211,238,.08),var(--card))}
+.price-card.feat::before{content:"核心交付";position:absolute;top:18px;right:18px;font-size:11px;font-weight:700;padding:5px 12px;border-radius:100px;background:var(--grad2);color:#04050e}
+.price-card .p-name{font-size:16px;color:var(--muted);margin-bottom:6px;font-weight:600}
+.price-card .p-price{font-size:44px;font-weight:800;font-family:"Sora";color:#fff;letter-spacing:-1px}
+.price-card .p-price .cur{font-size:20px;color:var(--gold);vertical-align:top}
+.price-card .p-price .per{font-size:15px;color:var(--muted);font-weight:400}
+.price-card .p-desc{color:var(--muted);font-size:14px;margin:14px 0 20px;min-height:44px}
+.price-card ul{list-style:none;display:flex;flex-direction:column;gap:11px;margin-bottom:26px;flex:1}
+.price-card ul li{font-size:13.5px;color:var(--text);padding-left:26px;position:relative}
+.price-card ul li::before{content:"✓";position:absolute;left:0;color:var(--cyan);font-weight:800}
+.price-card ul li.no{color:var(--dim)}
+.price-card ul li.no::before{content:"+";color:var(--gold)}
+
+/* ===== Timeline ===== */
+.timeline{position:relative;padding-left:20px;margin-top:20px}
+.timeline::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:2px;background:linear-gradient(var(--cyan),var(--violet),var(--pink))}
+.tl-item{position:relative;padding:0 0 32px 40px}
+.tl-item:last-child{padding-bottom:0}
+.tl-item::before{content:"";position:absolute;left:-7px;top:4px;width:16px;height:16px;border-radius:50%;background:var(--bg);border:3px solid var(--cyan);box-shadow:0 0 12px rgba(34,211,238,.6)}
+.tl-item .tl-day{font-size:12px;font-weight:700;color:var(--cyan);letter-spacing:1px;font-family:"JetBrains Mono"}
+.tl-item h4{font-size:17px;margin:4px 0 6px}
+.tl-item p{font-size:14px;color:var(--muted)}
+
+/* ===== SLA / list rows ===== */
+.sla-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+.sla-row{display:flex;gap:16px;align-items:flex-start;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px}
+.sla-row .si{font-size:24px;flex-shrink:0}
+.sla-row h4{font-size:15.5px;margin-bottom:5px}
+.sla-row p{font-size:13.5px;color:var(--muted)}
+
+/* ===== FAQ ===== */
+.faq-item{background:var(--card);border:1px solid var(--border);border-radius:14px;margin-bottom:12px;overflow:hidden;transition:.3s}
+.faq-item.open{border-color:var(--border2)}
+.faq-q{padding:20px 24px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:16px;font-weight:600;font-size:15.5px}
+.faq-q .qi{width:26px;height:26px;flex-shrink:0;border-radius:8px;border:1px solid var(--border);display:grid;place-items:center;transition:.3s;font-size:16px;color:var(--cyan)}
+.faq-item.open .qi{transform:rotate(45deg);background:var(--grad2);color:#04050e;border-color:transparent}
+.faq-a{max-height:0;overflow:hidden;transition:max-height .4s ease}
+.faq-a p{padding:0 24px 22px;color:var(--muted);font-size:14.5px}
+
+/* ===== CTA ===== */
+.cta-box{background:linear-gradient(135deg,rgba(34,211,238,.1),rgba(139,92,246,.12),rgba(236,72,153,.08));border:1px solid var(--border2);border-radius:28px;padding:64px 40px;text-align:center;position:relative;overflow:hidden}
+.cta-box h2{font-size:clamp(28px,4vw,42px);margin-bottom:16px}
+.cta-box p{color:var(--muted);font-size:17px;max-width:520px;margin:0 auto 32px}
+.cta-box .hero-cta{justify-content:center}
+
+/* ===== Footer ===== */
+footer{border-top:1px solid var(--border);padding:52px 24px 32px;background:rgba(6,8,22,.6)}
+.foot-grid{max-width:var(--maxw);margin:0 auto;display:grid;grid-template-columns:2fr 1fr 1fr;gap:40px;margin-bottom:36px}
+.foot-brand p{color:var(--muted);font-size:14px;max-width:340px;margin-top:14px}
+.foot-col h5{font-size:14px;margin-bottom:14px;color:#fff}
+.foot-col a{display:block;color:var(--muted);font-size:13.5px;margin-bottom:9px;transition:.2s}
+.foot-col a:hover{color:var(--cyan)}
+.foot-bottom{max-width:var(--maxw);margin:0 auto;padding-top:24px;border-top:1px solid var(--border);display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;font-size:12.5px;color:var(--dim)}
+
+.note-box{background:rgba(246,196,83,.06);border:1px solid rgba(246,196,83,.25);border-radius:14px;padding:18px 22px;font-size:13.5px;color:#d9c48c;margin-top:22px;display:flex;gap:12px}
+.note-box .ni{font-size:18px}
+
+/* ===== Real logo ===== */
+.logo-img{width:38px;height:38px;object-fit:contain;filter:drop-shadow(0 4px 14px rgba(139,92,246,.55))}
+
+/* ===== Gallery (real photos) ===== */
+.gallery{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.shot{position:relative;border-radius:18px;overflow:hidden;border:1px solid var(--border);aspect-ratio:16/11;transition:.35s}
+.shot:hover{border-color:var(--border2);transform:translateY(-5px);box-shadow:0 24px 50px -22px rgba(34,211,238,.35)}
+.shot img{width:100%;height:100%;object-fit:cover;transition:transform .6s ease}
+.shot:hover img{transform:scale(1.07)}
+.shot .cap{position:absolute;inset:auto 0 0 0;padding:44px 18px 16px;background:linear-gradient(transparent,rgba(4,5,14,.92));}
+.shot .cap h4{font-size:16px;margin-bottom:3px}
+.shot .cap span{font-size:12px;color:var(--muted)}
+.shot .badge{position:absolute;top:12px;left:12px;font-size:11px;font-weight:700;padding:5px 11px;border-radius:100px;background:rgba(4,5,14,.6);border:1px solid var(--border2);color:var(--cyan);backdrop-filter:blur(6px)}
+
+/* ===== Hero backdrop photo ===== */
+.hero-photo{position:absolute;inset:0;z-index:-1;opacity:.16;background:url('assets/datacenter.webp') center/cover;
+  mask-image:linear-gradient(to bottom,transparent,#000 40%,#000 70%,transparent);-webkit-mask-image:linear-gradient(to bottom,transparent,#000 40%,#000 70%,transparent)}
+
+/* ===== Responsive ===== */
+@media(max-width:900px){
+  .gallery{grid-template-columns:1fr}
+  .g4,.g3,.pf-grid,.price-grid{grid-template-columns:1fr}
+  .g2,.sla-grid{grid-template-columns:1fr}
+  .pipeline{grid-template-columns:repeat(2,1fr)}
+  .flow-arrow{display:none}
+  .calc-grid{grid-template-columns:1fr;gap:28px}
+  .stats-bar{grid-template-columns:repeat(2,1fr)}
+  .navlinks{display:none;position:absolute;top:100%;left:0;right:0;flex-direction:column;background:rgba(6,8,22,.97);padding:16px;border-bottom:1px solid var(--border)}
+  .navlinks.show{display:flex}
+  .navlinks a{padding:12px}
+  .burger{display:flex}
+  .nav-cta .btn-ghost{display:none}
+  .foot-grid{grid-template-columns:1fr;gap:26px}
+  section{padding:70px 20px}
+  .bom-head td,th{font-size:12.5px}
+  table{font-size:12px}
+  th,td{padding:11px 10px}
+}
+@media(max-width:560px){
+  .stats-bar{grid-template-columns:1fr 1fr}
+  .pipeline{grid-template-columns:1fr}
+  .calc-out{grid-template-columns:1fr}
+  .hero-cta{flex-direction:column;align-items:stretch}
+}
+
+/* ===== Print / 导出 PDF：转为浅色、展开全部内容、隐藏交互与装饰 ===== */
+@media print{
+  @page{margin:14mm}
+  :root{--text:#111;--muted:#444;--dim:#666;--border:#d5d9e6;--border2:#b9c0d6;--card:#fff;--card2:#fff}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-shadow:none!important;text-shadow:none!important;animation:none!important}
+  body{background:#fff!important;color:#111!important}
+  header,#progress,#bg-canvas,.bg-fixed,.bg-grid,.spotlight,.hero-photo,.scroll-ind,.marquee,.burger,.nav-cta,.tabs,.preset-btns,.range-scale,input[type=range],.faq-item .qi{display:none!important}
+  section{padding:16px 0!important;break-inside:avoid}
+  .hero{min-height:auto!important;padding-top:0!important}
+  .card,table,.price-card,.pcard,.shot,.calc,.sla-row,.flow-step,.timeline,.note-box{background:#fff!important;border-color:#d5d9e6!important;break-inside:avoid}
+  th{background:#eef0f8!important;color:#111!important}
+  .text-grad,.stat .num,.out-cell .v,.out-cell.hl .v,.lm .lmv,.price-card .p-price,.slider-label b,.p-price .cur{background:none!important;-webkit-text-fill-color:#3730a3!important;color:#3730a3!important}
+  .eyebrow{color:#3730a3!important;border-color:#c7c0f0!important;background:#f2f0fe!important}
+  .tab-pane{display:block!important;margin-bottom:14px}
+  .faq-a{max-height:none!important}
+  .faq-a p{padding:0 0 12px!important;color:#333!important}
+  .card p,.pcard p,.pf p,.section-sub,.card ul li{color:#333!important}
+  a{color:#111!important}
+  .hero-cta,.live-cta,.cta-box .hero-cta{display:none!important}
+  .pcard .picon{-webkit-print-color-adjust:exact}
+  .cta-box{background:#f5f6fc!important}
+}
+</style>
+</head>
+<body class="no-js">
+<script>document.body.classList.remove('no-js');</script>
+<div class="bg-fixed"></div>
+<div class="bg-grid"></div>
+<canvas id="bg-canvas"></canvas>
+<div class="spotlight" id="spot"></div>
+<div id="progress"></div>
+
+<!-- ===== NAV ===== -->
+<header id="header">
+  <nav>
+    <a href="#top" class="brand">
+      <img src="assets/boundless-mark-256.png" alt="无界科技 BOUNDLESS" class="logo-img" />
+      <span>无界科技<small>BOUNDLESS</small></span>
+    </a>
+    <div class="navlinks" id="navlinks">
+      <a href="#overview">系统概述</a>
+      <a href="#pipeline">引流闭环</a>
+      <a href="#platforms">平台矩阵</a>
+      <a href="#gallery">部署实景</a>
+      <a href="#hardware">硬件配置</a>
+      <a href="#calculator">配置测算</a>
+      <a href="#pricing">费用方案</a>
+      <a href="#delivery">交付服务</a>
+      <a href="#faq">常见问题</a>
+    </div>
+    <div class="nav-cta">
+      <a href="https://t.me/ai_zkw" target="_blank" class="btn btn-ghost">联系顾问</a>
+      <a href="#pricing" class="btn btn-primary">获取方案</a>
+      <div class="burger" id="burger"><span></span><span></span><span></span></div>
+    </div>
+  </nav>
+</header>
+
+<!-- ===== HERO ===== -->
+<section class="hero" id="top">
+  <div class="hero-photo"></div>
+  <div class="wrap">
+    <div class="hero-badge reveal">🌍 全球化 · 全自动 · 全平台 &nbsp;|&nbsp; 客户专属方案书 · <b>Confidential</b></div>
+    <h1 class="reveal d1">全球全自动<span class="text-grad">社媒引流</span><br/>与 AI 转化中枢</h1>
+    <p class="lead reveal d2">以真机集群 RPA 驱动 TikTok / Facebook 等全球社交平台，7×24 小时自动养号、获客、触达；再由多语言 AI 客服无缝承接对话、推进成交。一套系统，打通「引流 → 承接 → 转化」全链路。</p>
+    <div class="hero-cta reveal d3">
+      <a href="#calculator" class="btn btn-primary">▶ 在线测算我的配置</a>
+      <a href="#hardware" class="btn btn-ghost">查看硬件方案</a>
+    </div>
+    <div class="stats-bar reveal d4">
+      <div class="stat"><div class="num" data-count="7" data-suffix="+">0</div><div class="lbl">已打通/可扩展平台</div></div>
+      <div class="stat"><div class="num" data-count="200" data-suffix="+">0</div><div class="lbl">单集群可管真机数</div></div>
+      <div class="stat"><div class="num" data-count="24" data-suffix="/7">0</div><div class="lbl">无人值守自动运行</div></div>
+      <div class="stat"><div class="num" data-count="15" data-suffix="+">0</div><div class="lbl">语言 AI 自动应答</div></div>
+    </div>
+  </div>
+  <div class="scroll-ind"><div class="mouse"></div><span>SCROLL</span></div>
+</section>
+
+<!-- ===== MARQUEE ===== -->
+<div class="marquee">
+  <div class="marquee-track" id="mqtrack"></div>
+</div>
+
+<!-- ===== OVERVIEW ===== -->
+<section id="overview">
+  <div class="wrap">
+    <div class="center reveal">
+      <div class="eyebrow"><span class="dot"></span>系统概述</div>
+      <h2 class="title">不是「群控工具」，<br/>而是<span class="text-grad">获客-转化一体化增长系统</span></h2>
+      <p class="section-sub">市面工具只解决「批量操作」，我们交付的是从流量触达到成交承接的完整闭环 —— 真机反风控、AI 决策、数据可视，让 1 名运营管理数十上百个海外账号。</p>
+    </div>
+    <div class="grid g4" style="margin-top:48px">
+      <div class="card reveal d1">
+        <div class="ic-box">🤖</div>
+        <h3>真机 RPA 引擎</h3>
+        <p>基于 ADB + UIAutomator2 纯 UI 模拟操作，不走平台 API、不走网页协议，风控识别率极低。</p>
+      </div>
+      <div class="card reveal d2">
+        <div class="ic-box">🧠</div>
+        <h3>AI 决策与应答</h3>
+        <p>四层触发 + 多维情绪识别 + 意向评分，AI 自动判断「何时对谁发什么」，多语言拟人回复。</p>
+      </div>
+      <div class="card reveal d3">
+        <div class="ic-box">🛡️</div>
+        <h3>反风控合规栈</h3>
+        <p>拟人行为曲线、配额限流、冷却机制、VPN/代理地理伪装、设备指纹隔离，最大化账号存活。</p>
+      </div>
+      <div class="card reveal d4">
+        <div class="ic-box">📊</div>
+        <h3>集群与数据看板</h3>
+        <p>主控 + 多 Worker 分布式，实时投屏群控、转化漏斗、SLA 看板、A/B 实验，运营全程可视。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== PIPELINE ===== -->
+<section id="pipeline">
+  <div class="wrap">
+    <div class="center reveal">
+      <div class="eyebrow"><span class="dot"></span>全自动引流闭环</div>
+      <h2 class="title">六步闭环，<span class="text-grad">流量自动流转成交</span></h2>
+      <p class="section-sub">从新号冷启动到最终成交，每一步都由系统自动执行、数据留痕，人工只需在关键节点把关。</p>
+    </div>
+    <div class="pipeline reveal d1">
+      <div class="flow-step"><div class="n">1</div><div class="fic">🌱</div><h4>智能养号</h4><p>模拟真人浏览点赞，建立兴趣标签与账号权重</p><span class="flow-arrow">→</span></div>
+      <div class="flow-step"><div class="n">2</div><div class="fic">🎯</div><h4>精准获客</h4><p>关键词/竞品粉丝/评论区/话题标签采集目标客户</p><span class="flow-arrow">→</span></div>
+      <div class="flow-step"><div class="n">3</div><div class="fic">🤝</div><h4>自动触达</h4><p>加好友/关注/互动/私信，个性化话术批量执行</p><span class="flow-arrow">→</span></div>
+      <div class="flow-step"><div class="n">4</div><div class="fic">💬</div><h4>AI 承接</h4><p>多语言智能客服自动应答，识别意向、反异议</p><span class="flow-arrow">→</span></div>
+      <div class="flow-step"><div class="n">5</div><div class="fic">🔗</div><h4>引流转化</h4><p>引导至 WhatsApp/Telegram/私域，高意向转人工</p><span class="flow-arrow">→</span></div>
+      <div class="flow-step"><div class="n">6</div><div class="fic">📈</div><h4>数据复盘</h4><p>漏斗/成本/转化全程可视，A/B 实验持续优化</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== PLATFORMS ===== -->
+<section id="platforms">
+  <div class="wrap">
+    <div class="center reveal">
+      <div class="eyebrow"><span class="dot"></span>平台能力矩阵</div>
+      <h2 class="title">TikTok / Facebook <span class="text-grad">已成熟运行</span></h2>
+      <p class="section-sub">核心引流平台已全链路打通、稳定投产。其余平台已具备同栈基础能力，如需引导流量可按需二次开发快速上线。</p>
+    </div>
+    <div class="pf-grid reveal d1" style="margin-top:44px">
+      <div class="pcard live" style="--b1:#25f4ee;--b2:#fe2c55">
+        <span class="pstatus live">已上线</span>
+        <div class="picon"><svg viewBox="0 0 24 24"><path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"/></svg></div>
+        <h4>TikTok</h4><p>养号 · 采集 · 关注互动 · 私信 · 跨平台转化</p>
+      </div>
+      <div class="pcard live" style="--b1:#1877f2;--b2:#0a52c4">
+        <span class="pstatus live">已上线</span>
+        <div class="picon"><svg viewBox="0 0 24 24"><path d="M9.101 23.691v-7.98H6.627v-3.667h2.474v-1.58c0-4.085 1.848-5.978 5.858-5.978.401 0 .955.042 1.468.103a8.68 8.68 0 0 1 1.141.195v3.325a8.623 8.623 0 0 0-.653-.036 26.805 26.805 0 0 0-.733-.009c-.707 0-1.259.096-1.675.309a1.686 1.686 0 0 0-.679.622c-.258.42-.374.995-.374 1.752v1.297h3.919l-.386 2.103-.287 1.564h-3.246v8.245C19.396 23.238 24 18.179 24 12.044c0-6.628-5.373-12-12-12s-12 5.372-12 12c0 5.628 3.874 10.35 9.101 11.647Z"/></svg></div>
+        <h4>Facebook</h4><p>加好友 · 打招呼 · 群成员提取 · 信息流养号</p>
+      </div>
+      <div class="pcard live" style="--b1:#00b2ff;--b2:#7c3aed">
+        <span class="pstatus live">已上线</span>
+        <div class="picon"><svg viewBox="0 0 24 24"><path d="M.001 11.639C.001 4.949 5.241 0 12.001 0S24 4.95 24 11.639c0 6.689-5.24 11.638-12 11.638-1.21 0-2.38-.16-3.47-.46a.96.96 0 0 0-.64.05l-2.39 1.05a.96.96 0 0 1-1.35-.85l-.07-2.14a.97.97 0 0 0-.32-.68A11.39 11.389 0 0 1 .001 11.639zm8.32-2.19l-3.52 5.6c-.35.53.32 1.139.82.75l3.79-2.87c.26-.2.6-.2.87 0l2.8 2.1c.84.63 2.04.4 2.6-.48l3.52-5.6c.35-.53-.32-1.13-.82-.75l-3.79 2.87c-.25.2-.6.2-.86 0l-2.8-2.1a1.8 1.8 0 0 0-2.61.48z"/></svg></div>
+        <h4>Messenger</h4><p>收件箱监控 · AI 自动回复 · 陌生人请求处理</p>
+      </div>
+      <div class="pcard dev" style="--b1:#d62976;--b2:#4f5bd5">
+        <span class="pstatus dev">可扩展</span>
+        <div class="picon" style="background:linear-gradient(140deg,#feda75,#fa7e1e 25%,#d62976 55%,#962fbf 80%,#4f5bd5)"><svg viewBox="0 0 24 24"><path d="M12 0C8.74 0 8.333.015 7.053.072 5.775.132 4.905.333 4.14.63c-.789.306-1.459.717-2.126 1.384S.935 3.35.63 4.14C.333 4.905.131 5.775.072 7.053.012 8.333 0 8.74 0 12s.015 3.667.072 4.947c.06 1.277.261 2.148.558 2.913.306.788.717 1.459 1.384 2.126.667.666 1.336 1.079 2.126 1.384.766.296 1.636.499 2.913.558C8.333 23.988 8.74 24 12 24s3.667-.015 4.947-.072c1.277-.06 2.148-.262 2.913-.558.788-.306 1.459-.718 2.126-1.384.666-.667 1.079-1.335 1.384-2.126.296-.765.499-1.636.558-2.913.06-1.28.072-1.687.072-4.947s-.015-3.667-.072-4.947c-.06-1.277-.262-2.149-.558-2.913-.306-.789-.718-1.459-1.384-2.126C21.319 1.347 20.651.935 19.86.63c-.765-.297-1.636-.499-2.913-.558C15.667.012 15.26 0 12 0zm0 2.16c3.203 0 3.585.016 4.85.071 1.17.055 1.805.249 2.227.415.562.217.96.477 1.382.896.419.42.679.819.896 1.381.164.422.36 1.057.413 2.227.057 1.266.07 1.646.07 4.85s-.015 3.585-.074 4.85c-.061 1.17-.256 1.805-.421 2.227-.224.562-.479.96-.899 1.382-.419.419-.824.679-1.38.896-.42.164-1.065.36-2.235.413-1.274.057-1.649.07-4.859.07-3.211 0-3.586-.015-4.859-.074-1.171-.061-1.816-.256-2.236-.421-.569-.224-.96-.479-1.379-.899-.421-.419-.69-.824-.9-1.38-.165-.42-.359-1.065-.42-2.235-.045-1.26-.061-1.649-.061-4.844 0-3.196.016-3.586.061-4.861.061-1.17.255-1.814.42-2.234.21-.57.479-.96.9-1.381.419-.419.81-.689 1.379-.898.42-.166 1.051-.361 2.221-.421 1.275-.045 1.65-.06 4.859-.06l.045.03zm0 3.678c-3.405 0-6.162 2.76-6.162 6.162 0 3.405 2.76 6.162 6.162 6.162 3.405 0 6.162-2.76 6.162-6.162 0-3.405-2.76-6.162-6.162-6.162zM12 16c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4zm7.846-10.405c0 .795-.646 1.44-1.44 1.44-.795 0-1.44-.646-1.44-1.44 0-.794.646-1.439 1.44-1.439.793-.001 1.44.645 1.44 1.439z"/></svg></div>
+        <h4>Instagram</h4><p>关注 · 私信 · 评论区引流</p>
+      </div>
+      <div class="pcard dev" style="--b1:#25d366;--b2:#0b8a4d">
+        <span class="pstatus dev">可扩展</span>
+        <div class="picon"><svg viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/></svg></div>
+        <h4>WhatsApp</h4><p>私聊承接 · 群发 · 客服应答</p>
+      </div>
+      <div class="pcard dev" style="--b1:#29b6f6;--b2:#0088cc">
+        <span class="pstatus dev">可扩展</span>
+        <div class="picon"><svg viewBox="0 0 24 24"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg></div>
+        <h4>Telegram</h4><p>私信 · 群组 · AI 客服（MTProto）</p>
+      </div>
+      <div class="pcard dev" style="--b1:#4a4a4f;--b2:#050505">
+        <span class="pstatus dev">可扩展</span>
+        <div class="picon"><svg viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></div>
+        <h4>Twitter / X</h4><p>关注 · 私信 · 话题触达</p>
+      </div>
+      <div class="pcard dev" style="--b1:#0a8fe0;--b2:#00406e">
+        <span class="pstatus dev">可扩展</span>
+        <div class="picon"><svg viewBox="0 0 24 24"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg></div>
+        <h4>LinkedIn</h4><p>B2B 触达 · 建立连接 · 私信</p>
+      </div>
+      <div class="pcard dev" style="--b1:#06c755;--b2:#04a144">
+        <span class="pstatus dev">可扩展</span>
+        <div class="picon"><svg viewBox="0 0 24 24"><path d="M19.365 9.863c.349 0 .63.285.63.631 0 .345-.281.63-.63.63H17.61v1.125h1.755c.349 0 .63.283.63.63 0 .344-.281.629-.63.629h-2.386c-.345 0-.627-.285-.627-.629V8.108c0-.345.282-.63.63-.63h2.386c.346 0 .627.285.627.63 0 .349-.281.63-.63.63H17.61v1.125h1.755zm-3.855 3.016c0 .27-.174.51-.432.596a.577.577 0 0 1-.194.033.578.578 0 0 1-.51-.253l-2.443-3.317v2.94c0 .344-.279.629-.631.629-.346 0-.626-.285-.626-.629V8.108c0-.27.173-.51.43-.595a.588.588 0 0 1 .195-.033c.192 0 .388.096.507.253l2.442 3.317V8.108c0-.345.281-.63.63-.63.346 0 .626.285.626.63v4.771zm-5.741 0c0 .344-.28.629-.631.629-.346 0-.626-.285-.626-.629V8.108c0-.345.28-.63.626-.63.351 0 .631.285.631.63v4.771zm-2.466.629H4.917c-.345 0-.63-.285-.63-.629V8.108c0-.345.285-.63.63-.63.348 0 .63.285.63.63v4.141h1.756c.348 0 .629.283.629.63 0 .344-.281.629-.629.629M24 10.314C24 4.943 18.615.572 12 .572S0 4.943 0 10.314c0 4.811 4.27 8.842 10.035 9.608.391.082.923.258 1.058.59.12.301.079.766.038 1.08l-.164 1.02c-.045.301-.24 1.186 1.049.645 1.291-.539 6.916-4.078 9.436-6.975C23.176 14.393 24 12.458 24 10.314"/></svg></div>
+        <h4>LINE</h4><p>私聊承接 · 引流 · AI 客服</p>
+      </div>
+    </div>
+    <div class="note-box reveal"><span class="ni">💡</span><div><b>关于「其他 APP」：</b>系统采用统一的多平台动作引擎，新增平台无需重构。凡目标 APP 支持安卓真机操作，均可在现有框架上二次开发接入（关注/私信/内容/采集等动作），费用按需求另行评估报价。</div></div>
+  </div>
+</section>
+
+<!-- ===== CAPABILITIES ===== -->
+<section id="capabilities">
+  <div class="wrap">
+    <div class="center reveal">
+      <div class="eyebrow"><span class="dot"></span>核心功能清单</div>
+      <h2 class="title">交付即用的<span class="text-grad">全栈能力</span></h2>
+    </div>
+    <div class="grid g3 reveal d1" style="margin-top:44px">
+      <div class="card">
+        <div class="ic-box">🎯</div><h3>获客引擎</h3>
+        <ul><li>关键词 / 话题标签精准搜索</li><li>竞品粉丝列表批量采集</li><li>热门视频评论区活跃用户截流</li><li>群成员批量提取</li><li>Lead 库统一沉淀去重</li></ul>
+      </div>
+      <div class="card">
+        <div class="ic-box">💬</div><h3>AI 智能转化</h3>
+        <ul><li>四层触发 + 意向评分决策</li><li>多维情绪识别（信任/兴趣/焦虑）</li><li>15+ 语言拟人回复与反异议</li><li>知识库 FAQ 精准直答</li><li>高意向自动转人工接管</li></ul>
+      </div>
+      <div class="card">
+        <div class="ic-box">🛡️</div><h3>反风控与合规</h3>
+        <ul><li>拟人行为曲线（贝塞尔滑动/高斯点击）</li><li>分平台配额限流与冷却</li><li>VPN/代理池 + 出口 IP 健康检查</li><li>设备指纹与账号隔离</li><li>养号期渐进放量策略</li></ul>
+      </div>
+      <div class="card">
+        <div class="ic-box">🖥️</div><h3>集群与设备管理</h3>
+        <ul><li>1 主控 + N Worker 分布式扩展</li><li>热插拔设备自动纳管</li><li>Scrcpy 实时投屏群控（&lt;20ms）</li><li>Watchdog 掉线自动恢复</li><li>批量 APK 安装 / 账号分配</li></ul>
+      </div>
+      <div class="card">
+        <div class="ic-box">📊</div><h3>数据与运营看板</h3>
+        <ul><li>转化漏斗（触达→回复→引流→成交）</li><li>客户画像与旅程时间线</li><li>SLA 看板与客服 KPI</li><li>A/B 实验自动选优</li><li>周报 / 日报自动生成</li></ul>
+      </div>
+      <div class="card">
+        <div class="ic-box">🔔</div><h3>监控与告警</h3>
+        <ul><li>设备在线率 / 心跳健康</li><li>风控事件捕获与熔断</li><li>Telegram/飞书/钉钉 告警推送</li><li>成本追踪（LLM/设备/代理）</li><li>端到端自检 E2E Smoke</li></ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== GALLERY (real scenes) ===== -->
+<section id="gallery">
+  <div class="wrap">
+    <div class="center reveal">
+      <div class="eyebrow"><span class="dot"></span>真实部署场景</div>
+      <h2 class="title">看得见的<span class="text-grad">交付实力</span></h2>
+      <p class="section-sub">主控机房、真机阵列、运营控制中心 —— 一套标准化的物理部署，支撑全球 7×24 小时自动引流。</p>
+    </div>
+    <div class="gallery reveal d1" style="margin-top:44px">
+      <div class="shot"><span class="badge">主控机房</span><img src="assets/datacenter.webp" alt="主控机房" loading="lazy" /><div class="cap"><h4>主控 · 服务器机房</h4><span>集群调度 · 本地大模型 · 数据私有化</span></div></div>
+      <div class="shot"><span class="badge">真机阵列</span><img src="assets/phone-farm.webp" alt="真机阵列" loading="lazy" /><div class="cap"><h4>Worker · 真机阵列</h4><span>数十至上百台安卓真机集群运行</span></div></div>
+      <div class="shot"><span class="badge">控制中心</span><img src="assets/control-room.webp" alt="运营控制中心" loading="lazy" /><div class="cap"><h4>运营 · 数据控制中心</h4><span>漏斗 / SLA / 全球触达实时可视</span></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== HARDWARE ===== -->
+<section id="hardware">
+  <div class="wrap">
+    <div class="center reveal">
+      <div class="eyebrow"><span class="dot"></span>硬件配置方案</div>
+      <h2 class="title">三档标准配置，<span class="text-grad">按规模选型</span></h2>
+      <p class="section-sub">以下为推荐硬件配置清单（客户自备或委托代采，属一次性资产投入，独立于软件部署费）。硬件价格每日波动，本方案不标注单价，请以采购当日市场价为准、自行采购。</p>
+    </div>
+    <div class="tabs reveal d1" style="margin-top:36px">
+      <button class="tab-btn active" data-tab="starter">入门版 Starter<small>30 台真机 · 单一市场冷启</small></button>
+      <button class="tab-btn" data-tab="pro">专业版 Pro<small>60 台真机 · 多平台并行</small></button>
+      <button class="tab-btn" data-tab="ent">旗舰版 Enterprise<small>120 台真机 · 规模化放量</small></button>
+    </div>
+
+    <div class="tab-pane active" id="tab-starter">
+      <div class="bom-head"><h3>入门版 · 30 台真机集群</h3><span class="pill">1 主控 + 1 Worker · 单点位</span></div>
+      <table>
+        <thead><tr><th>类别</th><th>型号 / 规格</th><th class="r">数量</th></tr></thead>
+        <tbody>
+          <tr><td>主控一体机</td><td>16 核 / 64GB / 2TB NVMe / RTX 4060Ti 16G（兼 Worker）</td><td class="r">1</td></tr>
+          <tr><td>Worker 工作机</td><td>8 核 / 32GB / 512GB SSD</td><td class="r">1</td></tr>
+          <tr><td>引流真机</td><td>Redmi 13C 全球版 8+256（Android 13/14）</td><td class="r">30</td></tr>
+          <tr><td>工业 USB HUB</td><td>16 口独立供电 USB 3.0 集线器</td><td class="r">2</td></tr>
+          <tr><td>USB 数据线</td><td>0.5m 带磁环工业级</td><td class="r">30</td></tr>
+          <tr><td>养机充电架</td><td>30 位多层散热机架</td><td class="r">1</td></tr>
+          <tr><td>企业软路由</td><td>多 WAN 负载 / 策略路由</td><td class="r">1</td></tr>
+          <tr><td>千兆交换机</td><td>24 口网管型</td><td class="r">1</td></tr>
+          <tr><td>UPS 电源</td><td>1500VA 不间断电源</td><td class="r">1</td></tr>
+          <tr><td>SIM 卡</td><td>目标地区本地卡（含首月流量）</td><td class="r">30</td></tr>
+          <tr><td>辅材杂项</td><td>理线 / 标签 / 散热风扇 / 电源排插</td><td class="r">1 套</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="tab-pane" id="tab-pro">
+      <div class="bom-head"><h3>专业版 · 60 台真机集群</h3><span class="pill">1 主控 + 3 Worker · 换脸/本地 LLM</span></div>
+      <table>
+        <thead><tr><th>类别</th><th>型号 / 规格</th><th class="r">数量</th></tr></thead>
+        <tbody>
+          <tr><td>主控服务器</td><td>16 核 / 128GB / 2TB NVMe / RTX 4090 24G（换脸+本地大模型）</td><td class="r">1</td></tr>
+          <tr><td>Worker 工作机</td><td>8 核 / 32GB / 512GB SSD</td><td class="r">3</td></tr>
+          <tr><td>引流真机</td><td>Redmi 13C 全球版 8+256</td><td class="r">60</td></tr>
+          <tr><td>工业 USB HUB</td><td>16 口独立供电 USB 3.0</td><td class="r">4</td></tr>
+          <tr><td>USB 数据线</td><td>0.5m 带磁环工业级</td><td class="r">60</td></tr>
+          <tr><td>养机充电架</td><td>30 位多层散热机架</td><td class="r">2</td></tr>
+          <tr><td>企业软路由</td><td>多 WAN 负载 / 策略路由</td><td class="r">1</td></tr>
+          <tr><td>千兆交换机</td><td>24 口网管型</td><td class="r">1</td></tr>
+          <tr><td>UPS 电源</td><td>1500VA 不间断电源</td><td class="r">2</td></tr>
+          <tr><td>SIM 卡</td><td>目标地区本地卡（含首月流量）</td><td class="r">60</td></tr>
+          <tr><td>辅材杂项</td><td>理线 / 标签 / 散热 / 排插</td><td class="r">1 套</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="tab-pane" id="tab-ent">
+      <div class="bom-head"><h3>旗舰版 · 120 台真机集群</h3><span class="pill">1 主控 + 7 Worker · 企业机房级</span></div>
+      <table>
+        <thead><tr><th>类别</th><th>型号 / 规格</th><th class="r">数量</th></tr></thead>
+        <tbody>
+          <tr><td>主控服务器</td><td>16 核 / 128GB / 2TB NVMe / RTX 4090 24G</td><td class="r">1</td></tr>
+          <tr><td>Worker 工作机</td><td>8 核 / 32GB / 512GB SSD</td><td class="r">7</td></tr>
+          <tr><td>引流真机</td><td>Redmi 13C 全球版 8+256</td><td class="r">120</td></tr>
+          <tr><td>工业 USB HUB</td><td>16 口独立供电 USB 3.0</td><td class="r">8</td></tr>
+          <tr><td>USB 数据线</td><td>0.5m 带磁环工业级</td><td class="r">120</td></tr>
+          <tr><td>养机充电架</td><td>30 位多层散热机架</td><td class="r">4</td></tr>
+          <tr><td>企业软路由</td><td>多 WAN 负载 / 策略路由</td><td class="r">2</td></tr>
+          <tr><td>千兆交换机</td><td>24 口网管型</td><td class="r">2</td></tr>
+          <tr><td>UPS 电源</td><td>1500VA 不间断电源</td><td class="r">3</td></tr>
+          <tr><td>SIM 卡</td><td>目标地区本地卡（含首月流量）</td><td class="r">120</td></tr>
+          <tr><td>辅材杂项</td><td>理线 / 标签 / 散热 / 机柜 / 排插</td><td class="r">1 套</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note-box reveal"><span class="ni">📌</span><div><b>选型说明：</b>每台工作机通过独立供电 USB HUB 稳定管理约 15–16 台真机；手机推荐 Redmi 13C 等中端安卓机（性价比高、UI 稳定、社区适配成熟），亦可换用三星 A 系列。主控是否配备 RTX 4090 取决于是否启用 AI 实时换脸 / 本地私有大模型；仅做引流可选标准 GPU 降低成本。</div></div>
+    <div class="note-box reveal"><span class="ni">🛒</span><div><b>关于硬件价格：</b>主机、手机、配件等硬件价格每日波动，本方案仅列配置与数量、不标注单价与总价。请以采购当日市场行情为准，由客户自行采购或委托我方代采；硬件成本独立于软件部署费与月服务费。</div></div>
+  </div>
+</section>
+
+<!-- ===== CALCULATOR ===== -->
+<section id="calculator">
+  <div class="wrap">
+    <div class="center reveal">
+      <div class="eyebrow"><span class="dot"></span>互动配置测算器</div>
+      <h2 class="title">拖动滑块，<span class="text-grad">实时生成你的方案</span></h2>
+      <p class="section-sub">按目标手机数量，自动测算所需主机、配件规模与预估月度产能（不含硬件报价，硬件按当日市场价自行采购）。</p>
+    </div>
+    <div class="calc reveal d1" style="margin-top:40px">
+      <div class="calc-grid">
+        <div>
+          <div class="slider-label"><span>目标引流真机数量</span><b><span id="phoneVal">60</span> 台</b></div>
+          <input type="range" id="phoneSlider" min="10" max="200" step="5" value="60" />
+          <div class="range-scale"><span>10</span><span>50</span><span>100</span><span>150</span><span>200</span></div>
+          <div class="preset-btns">
+            <button data-p="30">入门 30</button>
+            <button data-p="60" class="on">专业 60</button>
+            <button data-p="120">旗舰 120</button>
+            <button data-p="200">超大 200</button>
+          </div>
+          <div class="note-box" style="margin-top:22px"><span class="ni">⚙️</span><div>测算基于「单台工作机稳定管理 16 台真机」「成熟期单机日均触达/私信/采集」经验值，实际以运营策略与市场为准。</div></div>
+        </div>
+        <div>
+          <div class="calc-out">
+            <div class="out-cell"><div class="k">🖥️ 主机总数</div><div class="v"><span id="oMachines">4</span> <small>台</small></div></div>
+            <div class="out-cell"><div class="k">🔧 其中 Worker</div><div class="v"><span id="oWorkers">3</span> <small>台</small></div></div>
+            <div class="out-cell"><div class="k">📱 真机 / SIM</div><div class="v"><span id="oPhones">60</span> <small>套</small></div></div>
+            <div class="out-cell"><div class="k">🔌 USB HUB</div><div class="v"><span id="oHubs">4</span> <small>个</small></div></div>
+            <div class="out-cell hl"><div class="k">💬 月意向对话</div><div class="v"><span id="oLeads">2,520</span></div></div>
+            <div class="out-cell hl"><div class="k">📈 月引流转化(估)</div><div class="v"><span id="oConv">200</span></div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:14px">
+            <div class="out-cell"><div class="k">月主动触达</div><div class="v" style="font-size:20px"><span id="oReach">39,000</span></div></div>
+            <div class="out-cell"><div class="k">月私信触达</div><div class="v" style="font-size:20px"><span id="oDM">16,800</span></div></div>
+            <div class="out-cell"><div class="k">月采集线索</div><div class="v" style="font-size:20px"><span id="oScrape">60,000</span></div></div>
+          </div>
+        </div>
+      </div>
+      <p class="calc-note">* 以上产能为成熟期理论上限估算，用于规模规划参考，不构成业绩承诺。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===== ROI ===== -->
+<section id="roi" style="padding-top:20px">
+  <div class="wrap">
+    <div class="center reveal">
+      <div class="eyebrow"><span class="dot"></span>ROI 投资回报测算</div>
+      <h2 class="title">算一算<span class="text-grad">多久回本</span></h2>
+      <p class="section-sub">结合上方配置的月意向对话量，输入你的业务参数，估算月净利与回本周期。</p>
+    </div>
+    <div class="calc reveal d1" style="margin-top:40px">
+      <div class="calc-grid">
+        <div>
+          <div class="slider-label"><span>客单价 (USD)</span><b>$<span id="aovVal">300</span></b></div>
+          <input type="range" id="aovSlider" min="50" max="2000" step="50" value="300" />
+          <div class="range-scale" style="margin-bottom:22px"><span>50</span><span>1000</span><span>2000</span></div>
+          <div class="slider-label"><span>毛利率</span><b><span id="marginVal">50</span>%</b></div>
+          <input type="range" id="marginSlider" min="10" max="90" step="5" value="50" />
+          <div class="range-scale" style="margin-bottom:22px"><span>10%</span><span>50%</span><span>90%</span></div>
+          <div class="slider-label"><span>意向对话→成交率</span><b><span id="cvrVal">8</span>%</b></div>
+          <input type="range" id="cvrSlider" min="1" max="30" step="1" value="8" />
+          <div class="range-scale"><span>1%</span><span>15%</span><span>30%</span></div>
+        </div>
+        <div>
+          <div class="calc-out">
+            <div class="out-cell"><div class="k">💬 月意向对话（来自配置）</div><div class="v" style="font-size:22px"><span id="rLeads">2,520</span></div></div>
+            <div class="out-cell"><div class="k">🤝 月成交客户</div><div class="v" style="font-size:22px"><span id="rDeals">202</span></div></div>
+            <div class="out-cell"><div class="k">💵 月毛利</div><div class="v" style="font-size:22px">$<span id="rProfit">30,240</span></div></div>
+            <div class="out-cell"><div class="k">📉 月运营成本估算</div><div class="v" style="font-size:22px">$<span id="rCost">4,000</span></div></div>
+            <div class="out-cell hl"><div class="k">✅ 月净利估算</div><div class="v">$<span id="rNet">26,240</span></div></div>
+            <div class="out-cell hl"><div class="k">⏱️ 部署费回本</div><div class="v"><span id="rPayback">0.5</span> <small>个月</small></div></div>
+          </div>
+          <div class="note-box" style="margin-top:14px"><span class="ni">🧮</span><div>回本周期 = 软件部署费 11,999 USDT ÷ 月净利（硬件按当日市场价自行采购，未计入）。月运营成本含月服务费 3,000 USDT + 代理/SIM/电费估算。</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== PRICING ===== -->
+<section id="pricing">
+  <div class="wrap">
+    <div class="center reveal">
+      <div class="eyebrow"><span class="dot"></span>费用方案</div>
+      <h2 class="title">清晰透明的<span class="text-grad">三段式报价</span></h2>
+      <p class="section-sub">软件部署与服务费用独立于硬件资产。当前功能范围内一价交付，后续新增需求另行评估。</p>
+    </div>
+    <div class="price-grid reveal d1" style="margin-top:44px">
+      <div class="price-card">
+        <div class="p-name">① 部署搭建费</div>
+        <div class="p-price"><span class="cur">USDT</span> 11,999 <span class="per">/ 一次性</span></div>
+        <div class="p-desc">现有成熟功能范围内的完整系统交付、部署、调试与培训。</div>
+        <ul>
+          <li>系统私有化部署（主控 + 全部 Worker）</li>
+          <li>TikTok / Facebook / Messenger 引流链路配置</li>
+          <li>设备集群接入、账号纳管、投屏群控调通</li>
+          <li>AI 客服话术 / 知识库 / 多语言初始化</li>
+          <li>反风控参数、配额、代理/VPN 配置</li>
+          <li>数据看板 + 告警接入</li>
+          <li>端到端联调 + 1 对 1 运营培训</li>
+        </ul>
+        <a href="https://t.me/ai_zkw" target="_blank" class="btn btn-ghost" style="width:100%;justify-content:center">咨询部署</a>
+      </div>
+      <div class="price-card feat">
+        <div class="p-name">② 月度服务费</div>
+        <div class="p-price"><span class="cur">USDT</span> 3,000 <span class="per">/ 月</span></div>
+        <div class="p-desc">持续保障系统稳定运行、迭代与技术支持。</div>
+        <ul>
+          <li>系统运维与稳定性保障</li>
+          <li>平台 UI 更新的选择器/适配跟进</li>
+          <li>反风控策略持续调优</li>
+          <li>版本更新与功能小迭代</li>
+          <li>话术 / 知识库优化建议</li>
+          <li>优先技术支持与故障响应</li>
+          <li>每周数据 review（可选）</li>
+        </ul>
+        <a href="https://t.me/ai_zkw" target="_blank" class="btn btn-primary" style="width:100%;justify-content:center">立即启动</a>
+      </div>
+      <div class="price-card">
+        <div class="p-name">③ 二次开发费</div>
+        <div class="p-price">按需 <span class="per">/ 独立报价</span></div>
+        <div class="p-desc">超出当前功能范围的新平台 / 新能力，单独立项评估。</div>
+        <ul>
+          <li class="no">新增平台接入（IG/WA/X/LinkedIn/LINE 等）</li>
+          <li class="no">定制业务工作流 / 行业域包</li>
+          <li class="no">AI 实时换脸 / 声音克隆 / 数字人</li>
+          <li class="no">深度 CRM / 广告归因 / BI 定制</li>
+          <li class="no">多租户 / 私有云 SaaS 化改造</li>
+          <li class="no">合规能力扩展（GDPR/CCPA）</li>
+        </ul>
+        <a href="https://t.me/ai_zkw" target="_blank" class="btn btn-ghost" style="width:100%;justify-content:center">需求评估</a>
+      </div>
+    </div>
+    <div class="note-box reveal"><span class="ni">💠</span><div><b>费用边界：</b>「部署费 + 月服务费」覆盖当前已成熟的 TikTok / Facebook / Messenger 全自动引流与 AI 转化能力。硬件（主机/手机/配件）为客户一次性资产，可自备或委托代采。任何超出现有功能的新需求，我们会先出具需求评估与独立开发报价，双方确认后再启动。</div></div>
+  </div>
+</section>
+
+<!-- ===== DELIVERY ===== -->
+<section id="delivery">
+  <div class="wrap">
+    <div class="grid g2" style="align-items:start;gap:48px">
+      <div class="reveal">
+        <div class="eyebrow"><span class="dot"></span>实施与交付</div>
+        <h2 class="title" style="font-size:32px">标准化<span class="text-grad">上线流程</span></h2>
+        <p class="section-sub" style="margin-bottom:30px">从签约到稳定运营，全程有节点、有交付、有验收。</p>
+        <div class="timeline">
+          <div class="tl-item"><div class="tl-day">DAY 0</div><h4>签约与需求确认</h4><p>确认目标市场、平台、语言、话术方向；硬件到位或代采下单。</p></div>
+          <div class="tl-item"><div class="tl-day">DAY 1–3</div><h4>环境与集群搭建</h4><p>主控/Worker 部署，设备接入纳管，网络/代理/VPN 配置，投屏群控调通。</p></div>
+          <div class="tl-item"><div class="tl-day">DAY 4–7</div><h4>业务配置与联调</h4><p>引流链路、AI 话术、知识库、反风控参数配置；端到端联调全绿。</p></div>
+          <div class="tl-item"><div class="tl-day">DAY 7–10</div><h4>养号与灰度上线</h4><p>新号冷启动养号，小批量灰度跑通「触达→承接→引流」闭环。</p></div>
+          <div class="tl-item"><div class="tl-day">持续</div><h4>放量与运营优化</h4><p>数据复盘、A/B 实验、策略调优，逐步扩大投产规模。</p></div>
+        </div>
+      </div>
+      <div class="reveal d2">
+        <div class="eyebrow"><span class="dot"></span>服务与 SLA</div>
+        <h2 class="title" style="font-size:32px">稳定<span class="text-grad">运行保障</span></h2>
+        <p class="section-sub" style="margin-bottom:30px">月服务费覆盖以下持续保障内容。</p>
+        <div class="sla-grid" style="grid-template-columns:1fr">
+          <div class="sla-row"><span class="si">🚨</span><div><h4>关键故障响应</h4><p>系统级故障/后台不可用，优先响应处置，快速恢复。</p></div></div>
+          <div class="sla-row"><span class="si">🔄</span><div><h4>平台适配跟进</h4><p>目标平台 UI 更新导致的选择器失效，跟进修复适配。</p></div></div>
+          <div class="sla-row"><span class="si">🛡️</span><div><h4>反风控调优</h4><p>根据账号存活数据持续优化行为参数与配额策略。</p></div></div>
+          <div class="sla-row"><span class="si">📦</span><div><h4>版本迭代</h4><p>系统版本更新与现有功能范围内的小幅优化。</p></div></div>
+          <div class="sla-row"><span class="si">🎓</span><div><h4>运营支持</h4><p>使用答疑、话术/策略建议、数据解读支持。</p></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== COMPLIANCE ===== -->
+<section id="compliance" style="padding-top:20px">
+  <div class="wrap">
+    <div class="card reveal" style="padding:40px">
+      <div class="eyebrow"><span class="dot"></span>风险与合规声明</div>
+      <div class="grid g2" style="gap:30px;margin-top:14px">
+        <div>
+          <h3 style="font-size:18px;margin-bottom:12px">客户责任边界</h3>
+          <ul style="list-style:none;display:flex;flex-direction:column;gap:10px">
+            <li style="padding-left:24px;position:relative;color:var(--muted);font-size:14px"><span style="position:absolute;left:0;color:var(--cyan)">▸</span>账号需合法获取，操作须符合目标地区法律与平台条款。</li>
+            <li style="padding-left:24px;position:relative;color:var(--muted);font-size:14px"><span style="position:absolute;left:0;color:var(--cyan)">▸</span>AI 生成内容建议人工最终把关，全程可在后台追溯。</li>
+            <li style="padding-left:24px;position:relative;color:var(--muted);font-size:14px"><span style="position:absolute;left:0;color:var(--cyan)">▸</span>因违反平台条款导致的账号风控风险由客户自行承担。</li>
+          </ul>
+        </div>
+        <div>
+          <h3 style="font-size:18px;margin-bottom:12px">我方保障</h3>
+          <ul style="list-style:none;display:flex;flex-direction:column;gap:10px">
+            <li style="padding-left:24px;position:relative;color:var(--muted);font-size:14px"><span style="position:absolute;left:0;color:var(--green)">▸</span>系统私有化部署，数据完全隔离，我方不留存客户业务数据。</li>
+            <li style="padding-left:24px;position:relative;color:var(--muted);font-size:14px"><span style="position:absolute;left:0;color:var(--green)">▸</span>内置反风控与合规护栏，最大化账号存活与稳定性。</li>
+            <li style="padding-left:24px;position:relative;color:var(--muted);font-size:14px"><span style="position:absolute;left:0;color:var(--green)">▸</span>本方案面向正当出海营销获客，不支持任何诈骗/违法用途。</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== FAQ ===== -->
+<section id="faq">
+  <div class="wrap" style="max-width:860px">
+    <div class="center reveal">
+      <div class="eyebrow"><span class="dot"></span>常见问题</div>
+      <h2 class="title">你可能关心的<span class="text-grad">问题</span></h2>
+    </div>
+    <div class="reveal d1" style="margin-top:40px">
+      <div class="faq-item"><div class="faq-q">部署费 11,999 USDT 具体包含哪些？<span class="qi">+</span></div><div class="faq-a"><p>包含现有成熟功能范围内的完整系统私有化部署、TikTok/Facebook/Messenger 引流链路配置、设备集群接入与投屏群控、AI 客服话术与多语言知识库初始化、反风控与代理配置、数据看板与告警接入、端到端联调，以及 1 对 1 运营培训。一次性收取。</p></div></div>
+      <div class="faq-item"><div class="faq-q">月服务费 3,000 USDT 是必须的吗？<span class="qi">+</span></div><div class="faq-a"><p>建议保留。社交平台 UI 和风控策略持续变化，月服务费用于保障系统稳定运行、平台适配跟进、反风控调优、版本迭代与优先技术支持。这是自动化系统长期稳定投产的关键保障。</p></div></div>
+      <div class="faq-item"><div class="faq-q">硬件是你们提供还是我们自己买？<span class="qi">+</span></div><div class="faq-a"><p>硬件（主机、手机、配件）属于客户一次性资产投入，独立于软件费用。你可以按我们提供的配置清单自行采购，也可委托我们代为采购与整备。由于硬件价格每日波动，本方案只给出配置与数量、不标注价格，实际以采购当日市场价为准。</p></div></div>
+      <div class="faq-item"><div class="faq-q">除了 TikTok 和 Facebook，还能做别的平台吗？<span class="qi">+</span></div><div class="faq-a"><p>可以。系统采用统一的多平台动作引擎，Instagram、WhatsApp、Telegram、Twitter/X、LinkedIn、LINE 等均已具备同栈基础能力。若需要将某平台作为正式引流渠道投产，我们按需求做二次开发接入，单独评估报价。</p></div></div>
+      <div class="faq-item"><div class="faq-q">一台电脑能带多少部手机？<span class="qi">+</span></div><div class="faq-a"><p>每台工作机通过独立供电的工业 USB HUB 可稳定管理约 15–16 台真机。规模更大时通过增加 Worker 节点横向扩展，单个主控集群可管理 200+ 台设备。</p></div></div>
+      <div class="faq-item"><div class="faq-q">账号会不会被封？<span class="qi">+</span></div><div class="faq-a"><p>系统内置完整反风控栈：拟人行为曲线、分平台配额限流、冷却机制、VPN/代理地理伪装、设备指纹隔离、养号期渐进放量等，最大化账号存活率。但社交平台风控客观存在，任何自动化都无法 100% 保证不被风控，因此建议合规操作 + 账号分层运营。</p></div></div>
+      <div class="faq-item"><div class="faq-q">多久能上线出效果？<span class="qi">+</span></div><div class="faq-a"><p>标准实施约 7–10 天完成部署、配置与灰度上线。新账号需要约 7 天养号期后才进入正常触达节奏，通常 2–4 周可看到稳定的引流与转化数据，随后进入放量优化阶段。</p></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== CTA ===== -->
+<section id="contact">
+  <div class="wrap">
+    <div class="cta-box reveal">
+      <h2>准备好开启<span class="text-grad">全球自动引流</span>了吗？</h2>
+      <p>一次部署，全天候自动获客。让我们的增长顾问为你定制专属落地方案。</p>
+      <div class="hero-cta">
+        <a href="https://t.me/ai_zkw" target="_blank" class="btn btn-primary">💬 Telegram 联系顾问</a>
+        <a href="#calculator" class="btn btn-ghost">重新测算配置</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== FOOTER ===== -->
+<footer>
+  <div class="foot-grid">
+    <div class="foot-brand">
+      <a href="#top" class="brand"><img src="assets/boundless-mark-256.png" alt="无界科技 BOUNDLESS" class="logo-img" /><span>无界科技<small>BOUNDLESS</small></span></a>
+      <p>让沟通，无界。面向全球市场的自动化社媒引流与 AI 转化中枢，助力出海企业规模化获客。</p>
+    </div>
+    <div class="foot-col">
+      <h5>方案导航</h5>
+      <a href="#overview">系统概述</a>
+      <a href="#platforms">平台矩阵</a>
+      <a href="#hardware">硬件配置</a>
+      <a href="#pricing">费用方案</a>
+    </div>
+    <div class="foot-col">
+      <h5>联系我们</h5>
+      <a href="https://t.me/ai_zkw" target="_blank">Telegram 顾问 @ai_zkw</a>
+      <a href="https://usdt2026.cc" target="_blank">官网 usdt2026.cc</a>
+      <a href="#calculator">在线配置测算</a>
+    </div>
+  </div>
+  <div class="foot-bottom">
+    <span>© 2026 无界科技 BOUNDLESS · 保留所有权利</span>
+    <span>本方案书为商业机密，仅供指定客户参阅 · Confidential</span>
+  </div>
+</footer>
+
+<script>
+/* ===== Progress bar ===== */
+const prog=document.getElementById('progress');
+const header=document.getElementById('header');
+function onScroll(){
+  const h=document.documentElement;
+  const sc=h.scrollTop/(h.scrollHeight-h.clientHeight);
+  prog.style.width=(sc*100)+'%';
+  header.classList.toggle('scrolled',h.scrollTop>40);
+}
+window.addEventListener('scroll',onScroll,{passive:true});onScroll();
+
+/* ===== Mobile menu ===== */
+const burger=document.getElementById('burger'),navlinks=document.getElementById('navlinks');
+burger.addEventListener('click',()=>navlinks.classList.toggle('show'));
+navlinks.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>navlinks.classList.remove('show')));
+
+/* ===== Reveal on scroll ===== */
+const revs=document.querySelectorAll('.reveal');
+const io=new IntersectionObserver((es)=>{es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}})},{threshold:.12});
+revs.forEach(r=>io.observe(r));
+
+/* ===== Count up ===== */
+function animateCount(el){
+  const target=+el.dataset.count,suffix=el.dataset.suffix||'';
+  let cur=0;const step=target/60;
+  const t=setInterval(()=>{cur+=step;if(cur>=target){cur=target;clearInterval(t);}el.textContent=Math.floor(cur)+suffix;},20);
+}
+const cio=new IntersectionObserver((es)=>{es.forEach(e=>{if(e.isIntersecting){animateCount(e.target);cio.unobserve(e.target);}})},{threshold:.5});
+document.querySelectorAll('[data-count]').forEach(el=>cio.observe(el));
+
+/* ===== Nav active highlight ===== */
+const secs=[...document.querySelectorAll('section[id]')];
+const nlinks=[...document.querySelectorAll('.navlinks a')];
+window.addEventListener('scroll',()=>{
+  let cur='';secs.forEach(s=>{if(scrollY>=s.offsetTop-120)cur=s.id;});
+  nlinks.forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+cur));
+},{passive:true});
+
+/* ===== Marquee build ===== */
+const mqData=[['🎵','TikTok'],['📘','Facebook'],['💬','Messenger'],['📸','Instagram'],['🟢','WhatsApp'],['✈️','Telegram'],['🐦','Twitter / X'],['💼','LinkedIn'],['🟩','LINE']];
+const mqTrack=document.getElementById('mqtrack');
+let mqHtml='';for(let k=0;k<2;k++){mqData.forEach(([i,n])=>{mqHtml+=`<span class="mq-item"><span class="ic">${i}</span>${n}</span>`;});}
+mqTrack.innerHTML=mqHtml;
+
+/* ===== Tabs ===== */
+document.querySelectorAll('.tab-btn').forEach(b=>{
+  b.addEventListener('click',()=>{
+    document.querySelectorAll('.tab-btn').forEach(x=>x.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    document.getElementById('tab-'+b.dataset.tab).classList.add('active');
+  });
+});
+
+/* ===== FAQ ===== */
+document.querySelectorAll('.faq-item').forEach(it=>{
+  const q=it.querySelector('.faq-q'),a=it.querySelector('.faq-a');
+  q.addEventListener('click',()=>{
+    const open=it.classList.contains('open');
+    document.querySelectorAll('.faq-item').forEach(x=>{x.classList.remove('open');x.querySelector('.faq-a').style.maxHeight=null;});
+    if(!open){it.classList.add('open');a.style.maxHeight=a.scrollHeight+'px';}
+  });
+});
+
+/* ===== Config Calculator ===== */
+const PER_MACHINE=16;
+const DEPLOY_FEE=11999, MONTH_FEE=3000;
+// per-phone monthly capacity (mature)
+const CAP={reach:650,dm:280,scrape:1000,leadRate:0.15,convRate:0.08};
+
+const phoneSlider=document.getElementById('phoneSlider');
+const el=id=>document.getElementById(id);
+function fmt(n){return Math.round(n).toLocaleString('en-US');}
+
+let lastLeads=2520;
+function calcConfig(){
+  const phones=+phoneSlider.value;
+  el('phoneVal').textContent=phones;
+  const machines=Math.max(1,Math.ceil(phones/PER_MACHINE));
+  const workers=Math.max(0,machines-1);
+  const hubs=Math.max(1,Math.ceil(phones/PER_MACHINE));
+  const reach=phones*CAP.reach, dm=phones*CAP.dm, scrape=phones*CAP.scrape;
+  const leads=Math.round(dm*CAP.leadRate);
+  const conv=Math.round(leads*CAP.convRate);
+  lastLeads=leads;
+  el('oMachines').textContent=machines;
+  el('oWorkers').textContent=workers;
+  el('oPhones').textContent=phones;
+  el('oHubs').textContent=hubs;
+  el('oLeads').textContent=fmt(leads);
+  el('oConv').textContent=fmt(conv);
+  el('oReach').textContent=fmt(reach);
+  el('oDM').textContent=fmt(dm);
+  el('oScrape').textContent=fmt(scrape);
+  calcRoi();
+  // preset highlight
+  document.querySelectorAll('.preset-btns button').forEach(b=>b.classList.toggle('on',+b.dataset.p===phones));
+}
+phoneSlider.addEventListener('input',calcConfig);
+document.querySelectorAll('.preset-btns button').forEach(b=>{
+  b.addEventListener('click',()=>{phoneSlider.value=b.dataset.p;calcConfig();});
+});
+
+/* ===== ROI Calculator ===== */
+const aovS=el('aovSlider'),marginS=el('marginSlider'),cvrS=el('cvrSlider');
+function calcRoi(){
+  const aov=+aovS.value,margin=+marginS.value/100,cvr=+cvrS.value/100;
+  const phones=+phoneSlider.value;
+  el('aovVal').textContent=aov;el('marginVal').textContent=marginS.value;el('cvrVal').textContent=cvrS.value;
+  const leads=lastLeads;
+  const deals=leads*cvr;
+  const profit=deals*aov*margin;
+  // operating cost: month fee + proxy(phones*8) + sim flow(phones*8) + power(machines est)
+  const machines=Math.max(1,Math.ceil(phones/PER_MACHINE));
+  const opCost=MONTH_FEE+phones*8+phones*6+machines*40;
+  const net=profit-opCost;
+  const invest=DEPLOY_FEE;
+  const payback=net>0?(invest/net):Infinity;
+  el('rLeads').textContent=fmt(leads);
+  el('rDeals').textContent=fmt(deals);
+  el('rProfit').textContent=fmt(profit);
+  el('rCost').textContent=fmt(opCost);
+  el('rNet').textContent=fmt(net);
+  el('rPayback').textContent=net>0?payback.toFixed(1):'—';
+}
+[aovS,marginS,cvrS].forEach(s=>s.addEventListener('input',calcRoi));
+
+calcConfig();
+
+/* ===== Spotlight follow ===== */
+const spot=document.getElementById('spot');
+window.addEventListener('mousemove',e=>{spot.style.opacity='1';spot.style.left=e.clientX+'px';spot.style.top=e.clientY+'px';},{passive:true});
+
+/* ===== Particle network canvas ===== */
+const cv=document.getElementById('bg-canvas'),ctx=cv.getContext('2d');
+let W,H,pts;
+function resize(){W=cv.width=innerWidth;H=cv.height=innerHeight;init();}
+function init(){
+  const n=Math.min(70,Math.floor(W*H/22000));
+  pts=[];for(let i=0;i<n;i++)pts.push({x:Math.random()*W,y:Math.random()*H,vx:(Math.random()-.5)*.4,vy:(Math.random()-.5)*.4});
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  for(let i=0;i<pts.length;i++){
+    const p=pts[i];p.x+=p.vx;p.y+=p.vy;
+    if(p.x<0||p.x>W)p.vx*=-1;if(p.y<0||p.y>H)p.vy*=-1;
+    ctx.beginPath();ctx.arc(p.x,p.y,1.6,0,7);ctx.fillStyle='rgba(34,211,238,.6)';ctx.fill();
+    for(let j=i+1;j<pts.length;j++){
+      const q=pts[j],dx=p.x-q.x,dy=p.y-q.y,d=Math.hypot(dx,dy);
+      if(d<130){ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(q.x,q.y);ctx.strokeStyle='rgba(139,92,246,'+(1-d/130)*.22+')';ctx.lineWidth=1;ctx.stroke();}
+    }
+  }
+  requestAnimationFrame(draw);
+}
+addEventListener('resize',resize);resize();draw();
+</script>
+</body>
+</html>

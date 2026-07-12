@@ -1,4 +1,7 @@
-export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://usdt2026.cc";
+// 站点根 URL：影响 metadataBase / OG 分享图 / 绝对链接。私域站已全站 noindex，
+// 故此值对 SEO 无影响；部署各镜像时用环境变量 NEXT_PUBLIC_SITE_URL 覆盖为该镜像自身域名。
+// 默认回落到域名池首个（见 lib/domains.ts MIRROR_DOMAINS）。
+export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://ai26.sbs";
 
 // 人工客服。注意：@handle 是 Telegram 平台实体，更名需在 Telegram 客户端/BotFather 同步操作，
 // 这里仅做引用集中化，可用环境变量覆盖。

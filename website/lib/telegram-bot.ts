@@ -408,7 +408,7 @@ export async function setupBot(opts?: { skipWebhook?: boolean }) {
   await run("setMyCommands", "setMyCommands", {
     commands: [
       { command: "start", description: "主菜单 / Main menu" },
-      { command: "services", description: "业务能力 · 五大产品线 / Solutions" },
+      { command: "services", description: "业务能力 · 三大产品系 / Solutions" },
       { command: "pricing", description: "价格 / Pricing" },
       { command: "autochat", description: "智聊 · AI 自动成交聊天 / ChatX AI closing" },
       { command: "deploy", description: "合作方式 · 私有部署 / Engagement" },

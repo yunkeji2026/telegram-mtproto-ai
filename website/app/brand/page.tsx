@@ -25,7 +25,7 @@ const COPY = {
       "私有部署、数据不出网、无审查限制——你想怎么用，就怎么用。这才是「无界」二字真正的底气。",
     slogan: "无界。让沟通，真正没有边界。",
     breakLabel: "打破",
-    productsHead: "五条产品线 · 打破五界",
+    productsHead: "三大产品系 · 打破边界",
     ctaTitle: "把「无界」用起来",
     ctaDesc: "一句话告诉我们你的场景，我们给方案与报价。",
     ctaBtn: "联系我们",

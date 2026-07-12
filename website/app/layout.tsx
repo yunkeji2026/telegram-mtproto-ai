@@ -12,6 +12,14 @@ import { BRAND, PRODUCT_ORDER, type ProductKey } from "@/lib/brand";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
+  // 私域站：禁止搜索引擎索引/收录（只做私域分发，不做公开推广/SEO）。
+  // 与 app/robots.ts 的 disallow:"/" 双保险；被镜像域名部署时同样生效。
+  robots: {
+    index: false,
+    follow: false,
+    nocache: true,
+    googleBot: { index: false, follow: false },
+  },
   title: "无界科技 BOUNDLESS · 让沟通无界",
   description:
     "无界科技 BOUNDLESS：用 AI 打破容貌、声音、语言、沟通的边界。AI 换脸、声音克隆、实时直播换脸换声、实时换语言、AI 自动成交聊天，私有部署、数据不出网、全程 USDT 结算。BOUNDLESS: AI face swap, voice clone, real-time live face/voice swap, live translation, and AI auto-closing chat — privately deployed, settled in USDT.",
@@ -72,11 +80,13 @@ const PRODUCT_OFFERS: Partial<Record<ProductKey, Parameters<typeof toSchemaOffer
   chatx: autochatOffers,
 };
 const PRODUCT_SCHEMA_ANCHOR: Record<ProductKey, string> = {
+  reachx: "#engage",
+  chatx: "#autochat",
   facex: "#showcase",
   voicex: "#realtime",
   livex: "#realtime",
   lingox: "#autochat",
-  chatx: "#autochat",
+  voxx: "#realtime",
 };
 const productServices = PRODUCT_ORDER.map((key) => {
   const p = BRAND.products[key];

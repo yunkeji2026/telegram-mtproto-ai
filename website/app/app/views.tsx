@@ -181,7 +181,7 @@ export function HomeView({ t, zh, onGo }: { t: Dict; zh: boolean; onGo: (v: View
       </div>
 
       {/* five product lines */}
-      <SectionTitle icon="🧭" title={zh ? "五大产品" : "Five products"} sub={zh ? "点产品进入对应演示" : "Tap a product for its demo"} />
+      <SectionTitle icon="🧭" title={zh ? "全线产品" : "All products"} sub={zh ? "点产品进入对应演示" : "Tap a product for its demo"} />
       <div className="grid grid-cols-2 gap-2">
         {productLineItems(zh ? "zh" : "en").map((p) => (
           <button

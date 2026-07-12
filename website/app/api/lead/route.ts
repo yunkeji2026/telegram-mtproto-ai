@@ -26,7 +26,7 @@ async function followUpCustomer(rec: LeadRecord) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   // only message customers we can trust (verified Mini App user)
   if (!token || rec.verified !== "verified" || !rec.tg_user_id) return;
-  const site = process.env.NEXT_PUBLIC_SITE_URL || "https://usdt2026.cc";
+  const site = process.env.NEXT_PUBLIC_SITE_URL || "https://ai26.sbs";
   const zh = rec.lang === "zh";
   const text = zh
     ? `👋 ${rec.name || "你好"}，已收到你的需求！\n\n我们会尽快联系你（约 5 分钟内）。期间你可以先看看 AI 自动成交聊天的演示与套餐 👇`

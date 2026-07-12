@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useLang } from "./LanguageContext";
 import BrandMark from "./BrandMark";
+import FallbackNotice from "./FallbackNotice";
 import { BRAND } from "@/lib/brand";
 
 const anchors = ["#showcase", "#pricing", "#about", "#contact"];
@@ -54,6 +55,11 @@ export default function Footer() {
               ))}
             </nav>
           </div>
+        </div>
+
+        {/* 域名防封 · 私域防走丢入口 */}
+        <div className="mt-10">
+          <FallbackNotice />
         </div>
 
         <div className="mt-10 flex flex-col items-center gap-3 border-t border-white/5 pt-6 text-center text-xs text-slate-600">
