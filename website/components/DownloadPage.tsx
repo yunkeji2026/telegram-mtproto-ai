@@ -19,7 +19,7 @@ import Reveal from "./fx/Reveal";
 import BrandMark from "./BrandMark";
 import Footer from "./Footer";
 import { BRAND } from "@/lib/brand";
-import { CONTACT_URL, DOWNLOAD_WIN_URL, DESKTOP_VERSION, DESKTOP_SIZE_MB } from "@/lib/site";
+import { CONTACT_URL, DOWNLOAD_WIN_URL, DOWNLOAD_IS_INTERNAL, DESKTOP_VERSION, DESKTOP_SIZE_MB } from "@/lib/site";
 import { track } from "@/lib/track";
 
 /** 桌面客户端下载 + 免费试用引导页（/download、/en/download）。
@@ -152,21 +152,15 @@ function DownloadNav() {
 
 function DownloadButton({ where }: { where: string }) {
   const { lang } = useLang();
-  const hasUrl = Boolean(DOWNLOAD_WIN_URL);
-  const href = hasUrl ? DOWNLOAD_WIN_URL : CONTACT_URL;
-  const label = hasUrl
-    ? lang === "zh"
-      ? "下载 Windows 版"
-      : "Download for Windows"
-    : lang === "zh"
-      ? "联系客服获取安装包"
-      : "Get the installer from us";
+  const label = lang === "zh" ? "下载 Windows 版" : "Download for Windows";
   return (
     <a
-      href={href}
-      target={hasUrl ? undefined : "_blank"}
-      rel={hasUrl ? undefined : "noreferrer"}
-      onClick={() => track("download_click", { where, has_url: hasUrl })}
+      href={DOWNLOAD_WIN_URL}
+      // 站内相对路径：加 download 属性直接落盘、同标签页；外部 CDN 绝对 URL：新开标签页。
+      {...(DOWNLOAD_IS_INTERNAL
+        ? { download: `ChatX-Setup-${DESKTOP_VERSION}.exe` }
+        : { target: "_blank", rel: "noreferrer" })}
+      onClick={() => track("download_click", { where, internal: DOWNLOAD_IS_INTERNAL })}
       className="group inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-neon-cyan to-neon-violet px-7 py-3 font-semibold text-ink-950 transition hover:opacity-90"
     >
       <Download className="h-4 w-4" />

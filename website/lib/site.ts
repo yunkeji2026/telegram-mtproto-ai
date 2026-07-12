@@ -20,8 +20,13 @@ export const CHANNEL_URL = `https://t.me/${TELEGRAM_CHANNEL}`;
 export const TELEGRAM_GROUP = process.env.NEXT_PUBLIC_TELEGRAM_GROUP || "hykjz";
 export const GROUP_URL = `https://t.me/${TELEGRAM_GROUP}`;
 
-// 桌面客户端（智聊 ChatX for Windows）下载。真实安装包由 CDN/对象存储托管后填
-// NEXT_PUBLIC_DOWNLOAD_WIN_URL；缺省为空 → 下载页按钮引导「联系客服获取」而非给死链。
-export const DOWNLOAD_WIN_URL = process.env.NEXT_PUBLIC_DOWNLOAD_WIN_URL || "";
+// 桌面客户端（智聊 ChatX for Windows）下载。
 export const DESKTOP_VERSION = process.env.NEXT_PUBLIC_DESKTOP_VERSION || "0.1.0";
 export const DESKTOP_SIZE_MB = process.env.NEXT_PUBLIC_DESKTOP_SIZE_MB || "238";
+// 默认走站内相对路径：安装包放 website/public/downloads/，随 website 部署上传，
+// 由 Next 直接 serve（无需外部 CDN，部署即可下）。迁 CDN/对象存储时设
+// NEXT_PUBLIC_DOWNLOAD_WIN_URL 覆盖为绝对 URL 即可，无需改代码。
+export const DOWNLOAD_WIN_URL =
+  process.env.NEXT_PUBLIC_DOWNLOAD_WIN_URL || `/downloads/ChatX-Setup-${DESKTOP_VERSION}.exe`;
+// 下载链接是否站内相对路径（决定是否加 download 属性 / 是否新开标签页）。
+export const DOWNLOAD_IS_INTERNAL = DOWNLOAD_WIN_URL.startsWith("/");
