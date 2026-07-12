@@ -24,6 +24,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Windows 默认 GBK 控制台无法编码 ✓/✗/⚠ 等状态符 → 打包成功后最后一行 print 会抛
+# UnicodeEncodeError 使脚本 exit 1（CI 打包烟测即便构建成功也误报失败）。强制 UTF-8。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 HERE = Path(__file__).resolve().parent          # desktop/build
 DESKTOP = HERE.parent                            # desktop
 REPO = DESKTOP.parent                            # 仓库根
