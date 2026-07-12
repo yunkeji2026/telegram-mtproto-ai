@@ -1973,29 +1973,9 @@ class AIChatAssistant:
                 except Exception as ex:
                     self.logger.warning("Web 管理后台启动跳过: %s", ex)
 
-            # 若启用监控，在后台线程启动监控 API（供前端对接）
-            mon = getattr(self.config, "config", {}) or {}
-            mon = mon.get("monitoring", {})
-            if mon.get("enabled", True):
-                try:
-                    port = int(mon.get("metrics_port", 9090))
-                    from src.monitoring.server import run_server
-                    _web_cfg = self.config.config.get("web_admin", {})
-                    mon_token = mon.get("auth_token") or _web_cfg.get("auth_token", "")
-                    t = threading.Thread(
-                        target=run_server,
-                        kwargs={"host": "127.0.0.1", "port": port,
-                                "assistant_ref": self, "auth_token": mon_token},
-                        daemon=True,
-                    )
-                    t.start()
-                    self._monitor_thread = t
-                    self.logger.info(
-                        "监控 API 线程已启动，正在绑定 127.0.0.1:%s（若端口被占用将在线程内失败，见日志）",
-                        port,
-                    )
-                except Exception as ex:
-                    self.logger.warning(f"监控 API 启动跳过: {ex}")
+            # 监控 API 后台线程（Stage 2：抽到 bootstrap/web_app.py::start_monitoring_thread）
+            from src.bootstrap.web_app import start_monitoring_thread
+            start_monitoring_thread(self)
             return True
 
         except Exception as e:

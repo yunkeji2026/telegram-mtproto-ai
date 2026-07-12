@@ -49,3 +49,35 @@ def start_web_server_thread(assistant: Any, server: Any, web_host: str, web_port
     )
     web_thread.start()
     return web_thread
+
+
+def start_monitoring_thread(assistant: Any):
+    """按配置启动监控 API 后台线程（供前端对接）。从 initialize() 原样抽出（行为不变）。
+
+    monitoring.enabled=false 时直接跳过。绑定失败只告警、不挡启动。返回线程或 None。
+    """
+    mon = getattr(assistant.config, "config", {}) or {}
+    mon = mon.get("monitoring", {})
+    if not mon.get("enabled", True):
+        return None
+    try:
+        port = int(mon.get("metrics_port", 9090))
+        from src.monitoring.server import run_server
+        _web_cfg = assistant.config.config.get("web_admin", {})
+        mon_token = mon.get("auth_token") or _web_cfg.get("auth_token", "")
+        t = threading.Thread(
+            target=run_server,
+            kwargs={"host": "127.0.0.1", "port": port,
+                    "assistant_ref": assistant, "auth_token": mon_token},
+            daemon=True,
+        )
+        t.start()
+        assistant._monitor_thread = t
+        assistant.logger.info(
+            "监控 API 线程已启动，正在绑定 127.0.0.1:%s（若端口被占用将在线程内失败，见日志）",
+            port,
+        )
+        return t
+    except Exception as ex:
+        assistant.logger.warning(f"监控 API 启动跳过: {ex}")
+        return None
