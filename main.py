@@ -208,6 +208,15 @@ class AIChatAssistant:
 
                 self.logger.info(f"日志已重新配置: level={log_level}, file={log_file}")
 
+            # 3b. 进程退出可观测（2026-07-12 无痕死亡排障配套）：哨兵残留检测上次
+            # 非正常死亡（taskkill /F / OOM 等任何死法）+ atexit/signal 记退出原因 +
+            # faulthandler 落致命 traceback。失败绝不挡启动。
+            try:
+                from src.utils.exit_sentinel import install as _install_exit_obs
+                _install_exit_obs()
+            except Exception:
+                self.logger.debug("退出可观测安装失败（已忽略）", exc_info=True)
+
             # 3. 初始化AI客户端
             self.ai_client = AIClient(self.config)
             await self.ai_client.initialize()
