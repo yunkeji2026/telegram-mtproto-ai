@@ -503,6 +503,30 @@
     </div>
   </div>
 </header>
+{% if ai_key_missing %}
+<!-- P0-1 A3：AI Key 未配置引导条（仅主管渲染；关闭记 localStorage，配好后服务端不再渲染） -->
+<div id="ws-aiguide" style="display:none;align-items:center;gap:10px;padding:8px 14px;
+     background:linear-gradient(90deg,#7c2d12,#9a3412);color:#ffedd5;font-size:13px;">
+  <span style="flex:0 0 auto;">🔑</span>
+  <span style="flex:1 1 auto;line-height:1.5;" data-i18n="ws.aiguide.text">{{ i18n.get('ws.aiguide.text', 'AI 大模型还没配置：填好 API Key 后，翻译和智能回复才能用。') }}</span>
+  <a href="/workspace/setup#ai" data-i18n="ws.aiguide.cta" style="flex:0 0 auto;padding:5px 14px;border-radius:8px;
+     background:#fff;color:#9a3412;font-weight:600;text-decoration:none;">{{ i18n.get('ws.aiguide.cta', '去配置') }}</a>
+  <span onclick="_wsAiGuideDismiss()" data-i18n="ws.aiguide.dismiss" style="flex:0 0 auto;cursor:pointer;opacity:.75;
+     padding:5px 8px;text-decoration:underline;">{{ i18n.get('ws.aiguide.dismiss', '先不管') }}</span>
+</div>
+<script>
+function _wsAiGuideDismiss(){
+  try{ localStorage.setItem('ws_aiguide_dismissed','1'); }catch(_){ }
+  var b=document.getElementById('ws-aiguide'); if(b) b.style.display='none';
+}
+(function(){
+  var dismissed=false;
+  try{ dismissed=localStorage.getItem('ws_aiguide_dismissed')==='1'; }catch(_){ }
+  var b=document.getElementById('ws-aiguide');
+  if(b && !dismissed) b.style.display='flex';
+})();
+</script>
+{% endif %}
 <script>
 function _wsToggleMore(e){ e.stopPropagation(); var m=document.getElementById('ws-more-menu'); if(m) m.classList.toggle('show'); }
 function _wsToggleUser(e){ e.stopPropagation(); var m=document.getElementById('ws-user-menu'); if(m) m.classList.toggle('show'); }

@@ -1,0 +1,53 @@
+{
+  "key": "crisis",
+  "label": {
+    "zh": "危机识别（severe 召回红线）",
+    "en": "Crisis detection"
+  },
+  "cmd": "python -m scripts.run_eval --crisis --json",
+  "status": "pass",
+  "report": {
+    "metrics": {
+      "total": 7,
+      "correct": 7,
+      "accuracy": 1.0,
+      "macro_f1": 1.0,
+      "per_label": {
+        "elevated": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 1
+        },
+        "none": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 4
+        },
+        "severe": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 2
+        }
+      },
+      "confusion": {
+        "severe->severe": 2,
+        "elevated->elevated": 1,
+        "none->none": 4
+      }
+    },
+    "summary": {
+      "total": 7,
+      "severe_total": 2,
+      "severe_recall": 1.0,
+      "elevated_recall": 1.0,
+      "false_alarm": 0
+    },
+    "severe_recall_target": 1.0,
+    "max_false_alarm": 0,
+    "passed": true
+  },
+  "generated_at": "2026-07-11T10:27:52+0800"
+}

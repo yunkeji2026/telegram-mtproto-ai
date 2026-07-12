@@ -1,0 +1,17 @@
+{
+  "key": "emotion-intensity",
+  "label": {
+    "zh": "情绪强度分级单调性",
+    "en": "Emotion intensity grading"
+  },
+  "cmd": "python -m scripts.run_eval --emotion-intensity --json",
+  "status": "pass",
+  "report": {
+    "summary": {
+      "total": 5,
+      "monotonic_rate": 1.0
+    },
+    "passed": true
+  },
+  "generated_at": "2026-07-11T10:27:52+0800"
+}

@@ -40,6 +40,39 @@ def test_empty_config_all_off():
         assert "建议开启" in _status(rep, k)["recommended"]
 
 
+# ── P0-3 三态：auto_translate_inbound 未配置时跟随翻译引擎可用性 ──────────────
+
+def test_auto_translate_unset_follows_runtime_on():
+    """flag 未配置 + translation_service 已挂载 → 看板判 active（与 B8「有引擎即开」一致）。"""
+    rep = collect_capability_status({}, runtime={"translation_service": True})
+    st = _status(rep, "auto_translate_inbound")
+    assert st["enabled"] is True
+    assert st["stage"] == "active"
+
+
+def test_auto_translate_unset_no_engine_stays_off():
+    """flag 未配置 + 无引擎 → 保持 off（不空跑攒 failed，与 inbound_translate 保守关一致）。"""
+    rep = collect_capability_status({}, runtime={"translation_service": False})
+    st = _status(rep, "auto_translate_inbound")
+    assert st["enabled"] is False
+    assert st["stage"] == "off"
+
+
+def test_auto_translate_explicit_false_overrides_runtime():
+    """显式 false 即使有引擎也关（运营意志优先于自动判定）。"""
+    cfg = {"workspace": {"auto_translate_inbound": {"enabled": False}}}
+    rep = collect_capability_status(cfg, runtime={"translation_service": True})
+    st = _status(rep, "auto_translate_inbound")
+    assert st["enabled"] is False
+    assert st["stage"] == "off"
+
+
+def test_auto_translate_unset_runtime_unknown_stays_off():
+    """未传 runtime（未知）→ 保守按关，不误报 active。"""
+    rep = collect_capability_status({})
+    assert _status(rep, "auto_translate_inbound")["enabled"] is False
+
+
 # ── tier0 安全栈开启 → active ───────────────────────────────────────────────
 
 def test_tier0_safeguards_active():

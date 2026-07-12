@@ -51,6 +51,7 @@ _BASELINE = """
 /api/admin/reliability	GET
 /api/admin/license	GET
 /api/admin/license/reload	POST
+/api/admin/license/activate	POST
 /api/admin/tts-cleanup	POST
 /api/admin/tts-stats	GET
 /api/ai-studio/summary	GET
@@ -448,6 +449,7 @@ _BASELINE = """
 /api/accounts	GET
 /api/accounts/orchestrator	GET
 /api/accounts/fleet-health	GET
+/api/accounts/send-health	GET
 /api/accounts/orchestrator/sync	POST
 /api/accounts/{platform}/{account_id}/start	POST
 /api/accounts/{platform}/{account_id}/stop	POST
@@ -624,6 +626,8 @@ _BASELINE = """
 /api/setup/channels/{channel}	POST
 /api/setup/checklist	GET
 /api/setup/companion-preflight	GET
+/api/setup/ai	GET
+/api/setup/ai-key	POST
 /api/companion/proactive/preview	GET
 /api/companion/capabilities	GET
 /api/companion/capabilities/delivery-calibration	GET
@@ -632,6 +636,8 @@ _BASELINE = """
 /api/companion/capabilities/toggle-audit	GET
 /api/companion/capabilities/preset	POST
 /api/companion/capabilities/rollback	POST
+/api/companion/standby	GET
+/api/companion/standby	POST
 /api/companion/capabilities/signals	GET
 /api/companion/capabilities/advice	GET
 /api/companion/quality-overview	GET

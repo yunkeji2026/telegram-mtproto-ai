@@ -123,6 +123,9 @@ class TranslationResult:
     provider: str = "none"
     cached: bool = False
     error: str = ""
+    # P0-2：确定性译文置信度 [0,1]（translation_confidence 评分）。-1 = 未评分
+    # （identity/失败/空文本等无意义评分的路径），前端据此跳过低置信提示。
+    confidence: float = -1.0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -134,6 +137,7 @@ class TranslationResult:
             "provider": self.provider,
             "cached": self.cached,
             "error": self.error,
+            "confidence": self.confidence,
         }
 
 
@@ -192,6 +196,20 @@ class TranslationService:
                 semantic_embed_fn=semantic_embed_fn,
                 semantic_min_similarity=semantic_min_similarity)
 
+    def rebind_ai_client(self, ai_client: Any) -> None:
+        """P0-1 首启向导：AI 凭证保存后热替换底层 client（免重启生效）。
+
+        同步换掉路由内 ``AIEngine`` 持有的旧 client（确定性引擎 DeepL/Google 与
+        client 无关，不动）。失败态结果只有短负缓存 TTL，无需清缓存。
+        """
+        self.ai_client = ai_client
+        try:
+            for eng in getattr(self._router, "_engines", []) or []:
+                if getattr(eng, "name", "") == "ai" and hasattr(eng, "_ai"):
+                    eng._ai = ai_client
+        except Exception:
+            pass
+
     def detect_language(self, text: str) -> str:
         return detect_language(text)
 
@@ -213,7 +231,16 @@ class TranslationService:
         与 ``translate`` 同样应用术语强制 + 品牌词不译保护（mask→译→restore），
         故每条候选都已是「术语合规」的成品。不写缓存/记忆（对照是一次性比较，
         择优后由前端走正常 translate/send 落库，避免把非首选引擎结果污染记忆）。
+
+        P0-2：每条成功候选附带确定性置信度（``confidence`` 分值 + ``confidence_tier``
+        high/mid/low 分档 + ``confidence_signals`` 关键信号），供坐席对照择优时
+        一眼识别「空译/未翻译/错语种/长度异常」的坏候选。失败候选不评分。
         """
+        from src.ai.translation_confidence import (
+            confidence_signals,
+            confidence_tier,
+            translation_confidence,
+        )
         from src.ai.translation_engines import apply_glossary_mask, restore_protected
 
         src_text = str(text or "")
@@ -240,12 +267,19 @@ class TranslationService:
 
         for r in results:
             text_out = restore_protected(r.text, mapping) if (r.ok and r.text) else ""
-            out["candidates"].append({
+            cand: Dict[str, Any] = {
                 "engine": r.engine,
                 "ok": bool(r.ok and text_out),
                 "translated_text": text_out,
                 "error": r.error,
-            })
+            }
+            if cand["ok"]:
+                # 评「原文 vs 还原后成品」（坐席实际看到的候选对），非引擎内部 masked 文本
+                score = translation_confidence(src_text, text_out, target)
+                cand["confidence"] = score
+                cand["confidence_tier"] = confidence_tier(score)
+                cand["confidence_signals"] = confidence_signals(src_text, text_out, target)
+            out["candidates"].append(cand)
         return out
 
     def update_glossary(
@@ -300,6 +334,23 @@ class TranslationService:
             mem.cached = True
             self._cache_put(key, mem)  # 回填 L1
             return mem
+
+        # P0-4 字符额度闸门：额度用尽且 licensing.enforce 开 → 阻断本次引擎翻译
+        # （缓存/记忆命中不受影响；调用方按「翻译失败」回落原文，绝不阻断消息投递）。
+        # 结果**不写缓存**——续费/换 key 后应立即恢复。闸门自身异常 → 放行。
+        try:
+            from src.licensing.quota_store import (
+                QUOTA_EXCEEDED_ERROR,
+                check_license_quota,
+            )
+
+            if not check_license_quota()["allowed"]:
+                return TranslationResult(
+                    src_text, src_text, source, target, False,
+                    provider="license", error=QUOTA_EXCEEDED_ERROR,
+                )
+        except Exception:
+            pass
 
         if not self._router.any_available():
             result = TranslationResult(
@@ -365,10 +416,20 @@ class TranslationService:
             src_text, out or src_text, source, target,
             bool(out), provider=res.engine,
         )
+        if result.ok:
+            # P0-2：成功译文附确定性置信度（经 to_dict 透传到 /translate 响应与
+            # 入站 enrich 的 message.translation，前端低置信给可见提示）。评分
+            # 纯函数零网络；失败/identity 路径保持 -1（未评分）。
+            try:
+                from src.ai.translation_confidence import translation_confidence
+                result.confidence = translation_confidence(src_text, out, target)
+            except Exception:
+                pass
         self._cache_put(key, result)
         if result.ok:
             self._memory_put(key, result, style, engine=res.engine)
             self._record_cost(src_text, out, source, target)
+            self._record_license_quota(src_text)
         return result
 
     def _memory_get(self, key: str) -> Optional[TranslationResult]:
@@ -380,7 +441,7 @@ class TranslationService:
             return None
         if not row:
             return None
-        return TranslationResult(
+        result = TranslationResult(
             source_text=str(row.get("source_text") or ""),
             translated_text=str(row.get("translated_text") or ""),
             source_lang=str(row.get("source_lang") or ""),
@@ -388,6 +449,14 @@ class TranslationService:
             ok=True,
             provider=str(row.get("engine") or "ai"),
         )
+        # P0-2：L2 记忆行不持久置信度（确定性评分随取随算，零成本零漂移）
+        try:
+            from src.ai.translation_confidence import translation_confidence
+            result.confidence = translation_confidence(
+                result.source_text, result.translated_text, result.target_lang)
+        except Exception:
+            pass
+        return result
 
     def _memory_put(self, key: str, result: "TranslationResult", style: str,
                     engine: str = "ai") -> None:
@@ -404,6 +473,15 @@ class TranslationService:
                 engine=engine or "ai",
                 glossary_ver=self._glossary_version,
             )
+        except Exception:
+            pass
+
+    def _record_license_quota(self, src: str) -> None:
+        """P0-4：成功引擎翻译后按源文字符记账（无额度授权零开销；绝不抛）。"""
+        try:
+            from src.licensing.quota_store import record_license_chars
+
+            record_license_chars("translation", len(src))
         except Exception:
             pass
 

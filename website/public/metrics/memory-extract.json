@@ -1,0 +1,22 @@
+{
+  "key": "memory-extract",
+  "label": {
+    "zh": "记忆抽取质量（启发式）",
+    "en": "Memory extraction quality"
+  },
+  "cmd": "python -m scripts.run_eval --memory-extract --json",
+  "status": "pass",
+  "report": {
+    "summary": {
+      "samples": 10,
+      "expect_total": 6,
+      "expect_found": 6,
+      "recall": 1.0,
+      "false_positives": 0
+    },
+    "recall_target": 0.8,
+    "max_false_positive": 0,
+    "passed": true
+  },
+  "generated_at": "2026-07-11T10:27:52+0800"
+}

@@ -201,7 +201,9 @@ def test_shared_send_limiter_returns_singleton():
     try:
         from src.client.sender import TelegramSenderMixin
         obj = TelegramSenderMixin.__new__(TelegramSenderMixin)
-        lim = obj._shared_send_limiter({})
-        assert lim is get_autoreply_limiter({})
+        # persist=false：仅验单例身份，不在测试期创建真实 config/account_sends.db
+        _cfg = {"protocol_autoreply": {"rate": {"persist": False}}}
+        lim = obj._shared_send_limiter(_cfg)
+        assert lim is get_autoreply_limiter(_cfg)
     finally:
         reset_autoreply_limiter()

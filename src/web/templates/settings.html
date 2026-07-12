@@ -226,6 +226,83 @@ textarea.f-inp.he-json-area{font-family:ui-monospace,SFMono-Regular,Consolas,mon
   })();
   </script>
 
+  <!-- ══ P0-4/C4 授权 / 激活（粘贴已签发 key → 写 config/license.key → reload） ══ -->
+  <div class="acc">
+    <div class="acc-hd" onclick="toggleAcc(this)">
+      <div class="acc-hd-icon" style="background:linear-gradient(135deg,#10b981,#059669)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+      </div>
+      <div>
+        <div class="acc-title">{{ (i18n or {}).get('set_s302', "授权 / 激活") }} <span id="lic-state-tag" style="font-size:.68rem;padding:.12rem .45rem;border-radius:5px;background:var(--input);color:var(--t2);font-weight:600;vertical-align:middle;margin-left:.4rem"></span></div>
+        <div class="acc-sub">{{ (i18n or {}).get('set_s303', "粘贴厂商签发的授权码即可激活；试用字符额度用量在此可见") }}</div>
+      </div>
+      <svg class="acc-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+    <div class="acc-body" id="body-license">
+      <div id="lic-cur" style="font-size:.82rem;color:var(--t2);margin-bottom:.9rem;line-height:1.7"></div>
+      <div class="f-row">
+        <label class="f-lbl">{{ (i18n or {}).get('set_s304', "粘贴授权码（license key）") }}</label>
+        <textarea class="f-inp" id="lic-key-input" rows="3" placeholder="eyJzdWIi…" spellcheck="false" style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.74rem;resize:vertical;"></textarea>
+        <p class="f-hint">{{ (i18n or {}).get('set_s305', "激活成功即写入 config/license.key 并立即生效；无效或过期的授权码不会写入。授权码由厂商离线签发，本系统不保存签发私钥。") }}</p>
+      </div>
+      <div style="display:flex;align-items:center;gap:.8rem;">
+        <button class="btn-primary" onclick="licActivate()" style="padding:.5rem 1.2rem;border:0;border-radius:8px;background:var(--p);color:#fff;font-weight:600;cursor:pointer;">{{ (i18n or {}).get('set_s306', "激活授权") }}</button>
+        <span class="save-result" id="lic-act-res"></span>
+      </div>
+    </div>
+  </div>
+  <script>
+  (function(){
+    function g(id){return document.getElementById(id);}
+    function stLabel(s){var m={active:'db_js_001',grace:'db_js_002',expired:'db_js_003',unlicensed:'db_js_004',invalid:'db_js_005',unavailable:'db_js_006'};return window.T(m[s]||'db_js_004');}
+    function planName(p){return {community:window.T('db_js_007'),basic:window.T('db_js_008'),pro:window.T('db_js_009'),flagship:window.T('db_js_010')}[p]||p||'—';}
+    function render(d){
+      var tag=g('lic-state-tag');
+      if(tag){
+        tag.textContent=stLabel(d.state);
+        tag.style.background=(d.state==='active'?'rgba(16,185,129,.14)':'var(--input)');
+        tag.style.color=(d.state==='active'?'#059669':'var(--t2)');
+      }
+      var cur=g('lic-cur'); if(!cur) return;
+      var parts=[window.T('set_js_094')+'：'+stLabel(d.state)+' · '+planName(d.plan)];
+      if(d.trial) parts.push(window.T('db_js_lic_trial'));
+      if(d.customer) parts.push(window.T('set_js_095')+'：'+d.customer);
+      if(d.days_left!=null&&d.days_left>=0&&d.state!=='unlicensed') parts.push(window.T('set_js_099')+'：'+d.days_left);
+      if(d.quota&&d.quota.included_chars>0){
+        parts.push(window.T('db_js_lic_chars')+'：'+((d.quota.used_chars||0).toLocaleString())+' / '+(d.quota.included_chars.toLocaleString()));
+      }
+      cur.textContent=parts.join('　·　');
+    }
+    function load(){
+      fetch('/api/admin/license').then(function(r){return r.json();}).then(function(d){
+        if(d&&d.ok) render(d);
+      }).catch(function(){});
+    }
+    window.licActivate=function(){
+      var res=g('lic-act-res');
+      var key=(g('lic-key-input').value||'').trim();
+      if(!key){ res.textContent=window.T('set_js_096'); res.className='save-result err'; return; }
+      res.textContent=window.T('ov_js_saving'); res.className='save-result';
+      fetch('/api/admin/license/activate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:key})})
+        .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
+        .then(function(x){
+          if(x.ok&&x.d&&x.d.ok){
+            res.textContent='✓ '+window.T('set_js_097'); res.className='save-result ok';
+            g('lic-key-input').value='';
+            render(x.d);
+          } else {
+            res.textContent=window.T('set_js_098')+((x.d&&x.d.detail)||window.T('inbox.voice.unknown_err'));
+            res.className='save-result err';
+          }
+        }).catch(function(){
+          res.textContent=window.T('set_js_098')+window.T('inbox.voice.unknown_err');
+          res.className='save-result err';
+        });
+    };
+    load();
+  })();
+  </script>
+
   <!-- ══ C1-2 试用 / 演示数据 ═══════════════════════════════════ -->
   <div class="acc">
     <div class="acc-hd" onclick="toggleAcc(this)">

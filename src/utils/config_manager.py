@@ -88,20 +88,39 @@ class ConfigManager:
         except Exception:
             return None
 
-    def _ensure_seeded(self, target: Path) -> None:
-        """打包/自包含部署：目标 config 不存在时，从内置 example 播种到用户可写目录。
+    def _bundled_desktop_min_path(self) -> Optional[Path]:
+        """内置桌面最小种子配置路径（P0-1 A1，落点同 example）。
 
-        失败永不抛（仅告警）；无内置 example 时不创建（load() 会报缺失并提示）。
+        无 ``YOUR_*`` 占位、只含「翻译最短路径」必需键；``AITR_DESKTOP_MODE`` 下播种
+        优先于完整 example，使干净机首启不带占位脏值（AI Key 由首启向导写 overlay）。
+        """
+        try:
+            base = Path(__file__).resolve().parent.parent.parent
+            mn = base / "config" / "config.desktop.min.yaml"
+            return mn if mn.exists() else None
+        except Exception:
+            return None
+
+    def _ensure_seeded(self, target: Path) -> None:
+        """打包/自包含部署：目标 config 不存在时，从内置种子播种到用户可写目录。
+
+        桌面模式（``AITR_DESKTOP_MODE`` 真）优先播种最小桌面种子（无占位），
+        否则回落完整 example。失败永不抛（仅告警）；无内置种子时不创建
+        （load() 会报缺失并提示）。
         """
         try:
             if target.exists():
                 return
             target.parent.mkdir(parents=True, exist_ok=True)
-            ex = self._bundled_example_path()
+            ex: Optional[Path] = None
+            if self._env_truthy("AITR_DESKTOP_MODE"):
+                ex = self._bundled_desktop_min_path()
+            if not ex:
+                ex = self._bundled_example_path()
             if ex and ex.exists():
                 import shutil
                 shutil.copyfile(str(ex), str(target))
-                self.logger.warning("配置不存在，已从内置示例播种到可写目录: %s", target)
+                self.logger.warning("配置不存在，已从内置种子播种到可写目录: %s ← %s", target, ex.name)
             else:
                 self.logger.warning("配置不存在且无内置 example，可写目录仍缺 config: %s", target)
         except Exception as exc:
@@ -250,6 +269,53 @@ class ConfigManager:
         except Exception:
             self.logger.debug("写入后自检失败（忽略）", exc_info=True)
         return True, "已保存", issues
+
+    def save_ai_credentials(self, values: Dict[str, Any]) -> tuple:
+        """P0-1 首启向导：把 AI 大模型凭证写入 config.local.yaml 的 ``ai:`` 段并即时生效。
+
+        走 overlay 而非改写主 config.yaml（保住注释/结构，密钥不进 git 跟踪文件）。
+        只接受白名单字段（防注入任意键）；空值字段跳过（部分更新，不清空已有值）。
+        返回 (成功?, 说明)。
+        """
+        allowed = ("provider", "api_key", "base_url", "model")
+        clean: Dict[str, Any] = {}
+        for k in allowed:
+            v = (values or {}).get(k)
+            if v is None:
+                continue
+            v = str(v).strip()
+            if not v:
+                continue
+            clean[k] = v
+        if not clean:
+            return False, "没有可保存的字段"
+        prov = clean.get("provider")
+        if prov and prov not in ("gemini", "openai_compatible"):
+            return False, f"未知 provider: {prov}"
+        path = self._overlay_path()
+        try:
+            overlay: Dict[str, Any] = {}
+            if path.exists():
+                with open(path, "r", encoding="utf-8") as f:
+                    overlay = yaml.safe_load(f) or {}
+            if not isinstance(overlay, dict):
+                overlay = {}
+            ai = dict(overlay.get("ai") or {})
+            ai.update(clean)
+            overlay["ai"] = ai
+            tmp = path.with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write("# 接入向导写入的凭证 overlay（深合并覆盖 config.yaml）。\n")
+                f.write("# 请勿提交到 git（应在 .gitignore）。\n")
+                yaml.dump(overlay, f, default_flow_style=False,
+                          allow_unicode=True, sort_keys=False)
+            tmp.replace(path)
+            self._deep_merge(self.config, overlay)
+        except Exception as exc:
+            self.logger.error("写入 AI 凭证 overlay 失败: %s", exc)
+            return False, f"写入失败: {exc}"
+        self.logger.info("AI 凭证已写入 overlay（字段: %s）", ", ".join(sorted(clean)))
+        return True, "已保存"
 
     def save_branding(self, values: Dict[str, Any]) -> tuple:
         """C1-1 白标：把品牌字段写入 config.local.yaml 的 ``brand:`` 段并即时生效。

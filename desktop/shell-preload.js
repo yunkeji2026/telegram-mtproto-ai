@@ -15,6 +15,10 @@ contextBridge.exposeInMainWorld("shell", {
   backendHealth: () => ipcRenderer.invoke("desktop:backend-health"),
   backendSpawnStatus: () => ipcRenderer.invoke("desktop:backend-spawn-status"),
   saveConfig: (patch) => ipcRenderer.invoke("desktop:save-config", patch),
+  // P0-1 首启向导：AI Key 状态 / 测试 / 保存（写后端 overlay，热生效）
+  setupAiStatus: () => ipcRenderer.invoke("desktop:setup-ai-status"),
+  setupTestAi: (body) => ipcRenderer.invoke("desktop:setup-test-ai", body),
+  setupSaveAiKey: (body) => ipcRenderer.invoke("desktop:setup-save-ai-key", body),
   injectUrl,
   // P2 业务右栏：renderer → 主进程 → 后端（CSP 安全）
   profile: (args) => ipcRenderer.invoke("desktop:profile", args),

@@ -2051,6 +2051,25 @@ class InboxStore:
             "trend": trend,
         }
 
+    def has_inbound_since(self, conversation_id: str, since_ts: float) -> bool:
+        """该会话在 ``since_ts`` 之后是否有过客户**入站**消息（送达安全视图的回复率用）。
+
+        纯只读，走 ``idx_msg_conv_ts``；异常按 False（保守：不误报「有回复」）。
+        """
+        cid = str(conversation_id or "")
+        if not cid:
+            return False
+        try:
+            with self._lock:
+                row = self._conn.execute(
+                    "SELECT 1 FROM messages WHERE conversation_id=? AND direction='in' "
+                    "AND ts>=? LIMIT 1",
+                    (cid, float(since_ts)),
+                ).fetchone()
+            return row is not None
+        except Exception:
+            return False
+
     def count_messages(self, conversation_id: str = "") -> int:
         with self._lock:
             if conversation_id:

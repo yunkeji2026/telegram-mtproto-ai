@@ -1,0 +1,59 @@
+{
+  "key": "emotion",
+  "label": {
+    "zh": "情绪维度识别准确率",
+    "en": "Emotion dimension accuracy"
+  },
+  "cmd": "python -m scripts.run_eval --emotion --json",
+  "status": "pass",
+  "report": {
+    "metrics": {
+      "total": 13,
+      "correct": 13,
+      "accuracy": 1.0,
+      "macro_f1": 1.0,
+      "per_label": {
+        "curious": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 1
+        },
+        "low_energy": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 2
+        },
+        "negative": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 3
+        },
+        "neutral": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 5
+        },
+        "positive": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 2
+        }
+      },
+      "confusion": {
+        "positive->positive": 2,
+        "negative->negative": 3,
+        "low_energy->low_energy": 2,
+        "curious->curious": 1,
+        "neutral->neutral": 5
+      }
+    },
+    "threshold": 0.8,
+    "passed": true
+  },
+  "generated_at": "2026-07-11T10:27:52+0800"
+}
