@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.inbox.autosend_helpers import autosend_voice
+from src.inbox.autosend_helpers import autosend_image, autosend_voice
 
 
 def _assistant(cfg: dict):
@@ -45,3 +45,29 @@ def test_owns_media_false_returns_false(monkeypatch):
 
     r = asyncio.run(autosend_voice(_assistant(cfg), "telegram", "acct", "chat", "hi"))
     assert r is False
+
+
+class TestAutosendImage:
+    def test_is_coroutine_function(self):
+        assert asyncio.iscoroutinefunction(autosend_image)
+
+    def test_disabled_empty_config_returns_false(self):
+        r = asyncio.run(autosend_image(_assistant({}), "telegram", "acct", "chat", "hi"))
+        assert r is False
+
+    def test_disabled_explicit_returns_false(self):
+        cfg = {"image_autosend": {"enabled": False}}
+        r = asyncio.run(autosend_image(_assistant(cfg), "telegram", "acct", "chat", "hi"))
+        assert r is False
+
+    def test_owns_media_false_returns_false(self, monkeypatch):
+        cfg = {"image_autosend": {"enabled": True}}
+
+        class _Orch:
+            def owns_media(self, platform, account_id):
+                return False
+
+        import src.integrations.account_orchestrator as _ao
+        monkeypatch.setattr(_ao, "get_orchestrator", lambda *a, **k: _Orch())
+        r = asyncio.run(autosend_image(_assistant(cfg), "telegram", "acct", "chat", "hi"))
+        assert r is False
