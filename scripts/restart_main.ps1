@@ -33,6 +33,13 @@ foreach ($p in $old) {
     Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
 }
 if (-not $old.Count) { Write-Host "[restart] no running main.py found (cold start)" }
+# 预期重启不算「无痕死亡」：Stop-Process -Force 是 TerminateProcess，进程内 atexit
+# 不会执行 → 哨兵残留 → 下次启动误报「非正常死亡」。本脚本知道这是预期重启，
+# 替进程清哨兵——残留语义从此纯净（只剩 OOM/手工 taskkill/崩溃/断电等真意外）。
+if ($old.Count) {
+    Start-Sleep -Milliseconds 500
+    Remove-Item "logs\run_sentinel.json" -Force -ErrorAction SilentlyContinue
+}
 
 # 2) 确认端口真正释放（防「进程表没找到但端口仍被占」的幽灵实例；上限 20s）
 $deadline = (Get-Date).AddSeconds(20)

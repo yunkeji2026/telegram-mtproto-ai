@@ -139,6 +139,68 @@ def _restart_counts(days: int = 7) -> dict:
     return dict(sorted(counter.items()))
 
 
+def _unclean_deaths_today() -> int:
+    """今日「非正常死亡」哨兵告警行数（exit_sentinel 启动检测写入 app.log）。"""
+    log = LOGS / "app.log"
+    if not log.exists():
+        return 0
+    today = time.strftime("%Y-%m-%d")
+    n = 0
+    try:
+        with log.open("r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if line.startswith(f"[{today}") and "非正常死亡" in line:
+                    n += 1
+    except OSError:
+        pass
+    return n
+
+
+def _detect_alerts(report: dict) -> list:
+    """异常判定（观察期的「主动上报」规则，供 --alert 弹窗/留痕）。"""
+    alerts = []
+    inst = report["instances"]
+    n_inst = inst.get("main_py_instances")
+    if n_inst != 1:
+        alerts.append(f"main.py 实例数异常: {n_inst}（0=服务死了，>1=多实例踩踏）")
+    if not inst.get("web_ready"):
+        alerts.append("web 后台(18799)不可达")
+    lat = report["thread_latency"]
+    fails = [x["conv"] for x in lat if not x.get("ok")]
+    if fails:
+        alerts.append(f"/thread 采样失败 {len(fails)}: {fails}")
+    worst = max((x["ms"] for x in lat if x.get("ok")), default=0)
+    if worst > 5000:
+        alerts.append(f"/thread 最慢 {worst}ms（回归「加载超时」前兆）")
+    rt = report["restarts_by_day"].get(time.strftime("%Y%m%d"), 0)
+    if rt > 3:
+        alerts.append(f"今日重启 {rt} 次，超纪律红线(3)")
+    deaths = report.get("unclean_deaths_today", 0)
+    if deaths:
+        alerts.append(f"今日非正常死亡 {deaths} 次（哨兵检出，查 app.log『非正常死亡』行）")
+    return alerts
+
+
+def _emit_alerts(alerts: list) -> None:
+    """告警出口：host_alert（弹窗+EventBus 镜像+去抖）+ 专用留痕文件。
+
+    health_report 是独立进程——host_alert 的 logger 无 file handler（进不了
+    app.log），故自留 logs/health_alerts.log 一行（计划任务场景无人看 stdout）。
+    """
+    msg = "\n".join(f"- {a}" for a in alerts)
+    try:
+        from src.utils.host_alert import notify_host
+        notify_host("生产健康告警（health_report）", msg,
+                    key="health_report", cooldown_sec=300)
+    except Exception:
+        pass
+    try:
+        with (LOGS / "health_alerts.log").open("a", encoding="utf-8") as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]\n{msg}\n")
+    except OSError:
+        pass
+
+
 def _hot_reload_counts(days: int = 7) -> dict:
     """按日统计 app.log 里的热重载事件（config / i18n 免重启通道的使用证据）。
 
@@ -172,6 +234,8 @@ def main() -> int:
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--jsonl", default="",
                     help="单行 JSON 追加到指定文件（计划任务每日跟踪用），成功时静默")
+    ap.add_argument("--alert", action="store_true",
+                    help="异常时主动告警（host_alert 弹窗 + logs/health_alerts.log 留痕）")
     ap.add_argument("--token", default="", help="web_admin.auth_token（不传则跳过延迟采样）")
     args = ap.parse_args()
 
@@ -191,7 +255,12 @@ def main() -> int:
         "inbound_xlate": _xlate_stock(),
         "restarts_by_day": _restart_counts(),
         "hot_reloads_by_day": _hot_reload_counts(),
+        "unclean_deaths_today": _unclean_deaths_today(),
     }
+    alerts = _detect_alerts(report)
+    report["alerts"] = alerts
+    if args.alert and alerts:
+        _emit_alerts(alerts)
 
     if args.jsonl:
         # 精简行（趋势用）：不携带 by_conv/逐会话明细，只留可画线的聚合数
@@ -209,6 +278,8 @@ def main() -> int:
                 time.strftime("%Y%m%d"), 0),
             "hot_reloads_today": (_hr.get("config", {}).get(_today, 0)
                                   + _hr.get("i18n", {}).get(_today, 0)),
+            "unclean_deaths_today": report["unclean_deaths_today"],
+            "alerts": len(report["alerts"]),
         }
         out = Path(args.jsonl)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -242,6 +313,10 @@ def main() -> int:
     print(f"[重启频率] {rc}" + (f" ⚠ 超纪律（>3/日）: {flagged}" if flagged else " ✅"))
     hr = report["hot_reloads_by_day"]
     print(f"[免重启通道] config 热重载 {hr.get('config') or '{}'} · i18n 热加载 {hr.get('i18n') or '{}'}")
+    if report["unclean_deaths_today"]:
+        print(f"[退出哨兵] ⚠ 今日非正常死亡 {report['unclean_deaths_today']} 次（详见 app.log『非正常死亡』行）")
+    if alerts:
+        print("[告警] " + " | ".join(alerts))
     return 0
 
 

@@ -4,4 +4,6 @@
 #     /TR "powershell -NoProfile -ExecutionPolicy Bypass -File D:\workspace\telegram-mtproto-ai\scripts\health_report_task.ps1"
 $ErrorActionPreference = "SilentlyContinue"
 Set-Location (Split-Path $PSScriptRoot -Parent)
-python -m scripts.health_report --jsonl logs\health_trend.jsonl
+# --alert：异常（服务死/多实例/采样失败/超纪律重启/非正常死亡）主动弹窗 + 留痕
+# logs\health_alerts.log（host_alert 自带 5min 去抖，计划任务多次触发不刷屏）
+python -m scripts.health_report --jsonl logs\health_trend.jsonl --alert
